@@ -1,1 +1,6 @@
 /target
+out
+*.txt
+test.html
+test.sh
+.DS_Store

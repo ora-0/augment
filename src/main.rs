@@ -1,172 +1,143 @@
-use std::{char, fs::read_to_string, io, panic};
+mod lexer;
+mod parser;
+use lexer::Lexer;
+use parser::{Parser, Value};
+mod template;
+use std::{collections::HashMap, env, fs::read_to_string, io::{self, stdin, Read}, rc::Rc};
+use template::augment;
 
-struct Block {
-    head: String,
-    content: String,
-    tail: String,
-    render: (),
-}
-
-impl Block {
-    fn new(head: &str, content: &str, tail: &str) -> Self {
-        Block {
-            head: head.to_string(),
-            content: content.to_string(),
-            tail: tail.to_string(),
-            render: (),
+fn parse_value(value: &str) -> Value {
+    // eprintln!("{value}");
+    if value.starts_with('"') && value.ends_with('"') {
+        let mut string = value.chars();
+        string.next();
+        string.next_back();
+        return Value::String(string.as_str().into());
+    } else if value.starts_with('[') && value.ends_with(']') {
+        let mut inner = value.chars().peekable();
+        inner.next();
+        inner.next_back();
+        return parse_array(&mut inner);
+    } else if value.is_empty() {
+        return Value::Null;
+    } else if value.starts_with(char::is_numeric) {
+        let number = value.parse().expect("Failed to parse number");
+        return Value::Number(number);
+    } else {
+        match value {
+            "true" => return Value::Boolean(true),
+            "false" => return Value::Boolean(false),
+            string => return Value::String(string.into()),
         }
     }
 }
 
-#[derive(Debug)]
-enum Keyword {
-    If,
-    For,
-    In,
-}
-
-#[derive(Debug)]
-enum Token {
-    Hashtag,
-    Colon,
-    Slash,
-    OParen,
-    CParen,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Dot,
-    Not,
-    Keyword(Keyword),
-    Ident(String),
-}
-
-type Template = Vec<Token>;
-#[derive(Debug)]
-enum DocumentKind {
-    Markup(String),
-    Template(Template),
-}
-
-struct Lexer {
-    contents: String,
-    current: usize,
-}
-
-impl Lexer {
-    fn new<'a>(contents: String) -> Self {
-        Lexer {
-            contents,
-            current: 0,
+fn parse_array(inner: &mut impl Iterator<Item = char>) -> Value {
+    let mut vec = Vec::new();
+    let mut value = String::new(); // can't use take_while() because it will consume the last character
+    while let Some(char) = inner.next() {
+        if char == '[' {
+            value.clear();
+            vec.push(parse_array(inner));
+            continue;
         }
-    }
-
-    fn next_char(&mut self) -> Option<char> {
-        let result = self.contents.chars().nth(self.current);
-        self.current += 1;
-        result
-    }
-
-    fn peek_char(&self) -> Option<char> {
-        self.contents.chars().nth(self.current)
-    }
-
-    fn next_ident(&mut self) -> Token {
-        let mut string = String::new();
-        while let Some(peek) = self.peek_char() {
-            if !(peek.is_alphanumeric() || peek == '_') {
-                // dbg!(peek);
-                break;
+        if char == ']' {
+            if !value.is_empty() {
+                vec.push(parse_value(&value));
+                value.clear();
             }
-            string.push(peek);
-            self.current += 1;
+            break;
         }
-
-        use Keyword::*;
-        let token = match string.as_str() {
-            "if" => Token::Keyword(If),
-            "for" => Token::Keyword(If),
-            "in" => Token::Keyword(If),
-            _ => Token::Ident(string),
-        };
-        token
-    }
-
-    fn next_token(&mut self) -> Option<Token> {
-        self.skip_whitespace();
-        let mut token = String::new();
-        let char = self.peek_char()?;
-        // dbg!(char);
-        let result = match char {
-            '#' => Some(Token::Hashtag),
-            ':' => Some(Token::Colon),
-            '/' => Some(Token::Slash),
-            '}' => None,
-
-            // having return here skips `self.current += 1` below the match stmt
-            'a'..='z' | 'A'..='Z' | '_' => return Some(self.next_ident()),
-            _ => panic!("Unexpected character in template"),
-        };
-
-        self.current += 1;
-        result
-    }
-
-    fn next_template(&mut self) -> Template {
-        let mut template = Vec::new();
-        while let Some(token) = self.next_token() {
-            template.push(token);
-        }
-        template
-    }
-
-    fn execute(&mut self) -> Vec<DocumentKind> {
-        let mut tokens = Vec::new();
-        loop {
-            let Some(before) = self.read_until('{') else {
-                break;
-            };
-            tokens.push(DocumentKind::Markup(before));
-
-            let template = self.next_template();
-            tokens.push(DocumentKind::Template(template));
-        }
-
-        tokens
-    }
-
-    fn skip_whitespace(&mut self) {
-        while let Some(char) = self.peek_char() {
-            // println!("{char} {skipped}, {curr}", skipped = !char.is_whitespace(), curr = self.current );
-            if !char.is_whitespace() {
-                return;
+        if char == ',' {
+            if !value.is_empty() {
+                vec.push(parse_value(&value));
+                value.clear();
             }
-            self.current += 1;
-            // println!("{curr}", curr = self.current );
+            continue;
         }
+        if char.is_whitespace() && value.is_empty() {
+            continue;
+        }
+        value.push(char);
     }
+    return Value::Array(Rc::new(vec));
+}
 
-    fn read_until(&mut self, target: char) -> Option<String> {
-        let mut string = String::new();
-        while let Some(char) = self.next_char() {
-            if char == target {
-                return Some(string);
-            }
-            string.push(char);
-        }
+fn parse_argument(param: String) -> (String, Value) {
+    let Some((ident, value)) = param.split_once('=') else {
+        panic!("Expected equals sign in parameter specification. Example: username=\"John\"")
+    };
+    let value = value.trim();
+    let value = parse_value(value);
+    (ident.to_owned(), value)
+}
 
-        // if self.next_char() is none, also return none
-        None
+fn read_from_stdin() -> String {
+    let mut handle = stdin().lock();
+    let mut buf = Vec::new();
+    handle.read_to_end(&mut buf).expect("Failed to read from stdin");
+    match String::from_utf8(buf) {
+        Ok(string) => string,
+        Err(err) => panic!("Failed convert stdin to string: {err}"),
     }
 }
 
 fn main() -> io::Result<()> {
-    let contents = read_to_string("./test.html")?;
+    let mut arguments = env::args().peekable();
+    arguments.next();
 
-    let mut lexer = Lexer::new(contents);
+    let mut environment = HashMap::new();
+    let mut advance = false;
+    let contents = arguments.peek().map(|argument| {
+        if argument.starts_with('-') {
+            return read_from_stdin()
+        }
+
+        advance = true;
+        match read_to_string(argument) {
+            Ok(contents) => return contents,
+            Err(err) => panic!("Failed to read file: {err}"),
+        }
+    }).unwrap_or_else(read_from_stdin);
+
+    if advance { arguments.next(); }
+    if let Some(argument) = arguments.next() {
+        if argument == "-i" {
+            environment = arguments.map(parse_argument).collect();
+        }
+    }
+
+    let mut lexer = Lexer::new(contents.to_owned());
     let result = lexer.execute();
-    println!("{result:#?}");
+    // println!("{result:#?}");
+
+    let parser = Parser::new();
+    let result = parser.execute(result);
+    // println!("{result:#?}");
+
+    let result = augment(result, &mut environment);
+    println!("{result}");
 
     Ok(())
 }
+
+
+    /*
+        let test = r#"
+        {#if 12 > (1 + 5 * 4) * -5}
+            <p>yea huh</p>
+            {#for user in users}
+                <p>{user}</p>
+            {/}
+        {:else if cond}
+            <p>maybe</p>
+        {:else}
+            <p>no</p>
+        {/}
+    "#;
+        let test1 = "{(true & false) | 5 > 4 | false}";
+        let test2 = "{!(1+!4)}";
+        let test3 = "{cond ++ \"hello\"} {v}";
+        let test4 = "{users[len(users) - 1]}";
+        let test5 = "{pow(5,3)}";
+    */
