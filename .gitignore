@@ -4,3 +4,4 @@ out
 test.html
 test.sh
 .DS_Store
+Cargo.lock
