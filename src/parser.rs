@@ -12,6 +12,22 @@ pub(crate) enum Content {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) enum Block {
+    If {
+        condition: Expr,
+    },
+    ElseIf {
+        condition: Expr,
+    },
+    Else,
+    For {
+        // has to be an identifier
+        element: Value,
+        iterable: Value,
+    },
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum Expr {
     BinaryOp {
         kind: BinaryOp,
@@ -176,22 +192,6 @@ impl Operation for UnaryOp {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum Block {
-    If {
-        condition: Expr,
-    },
-    ElseIf {
-        condition: Expr,
-    },
-    Else,
-    For {
-        // has to be an identifier
-        element: Value,
-        iterable: Value,
-    },
-}
-
 pub(crate) struct Parser {
     template: Vec<Token>,
     ast: Contents,
@@ -260,25 +260,6 @@ impl Parser {
     fn decrease_nesting(&mut self) {
         self.nesting_path.pop();
     }
-
-    // fn get_last_block_added(&mut self) -> &mut Contents {
-    //     // polonius issue
-    //     let mut last = &mut self.ast;
-
-    //     for i in 0.. {
-    //         match last.last() {
-    //             Some(Content::Block { .. }) if i < self.nesting_level => {
-    //                 let Content::Block { ref mut body, .. } = last.last_mut().unwrap() else {
-    //                     unreachable!()
-    //                 };
-
-    //                 last = body;
-    //             }
-    //             _ => return last,
-    //         };
-    //     }
-    //     unreachable!()
-    // }
 
     fn parse_identifier(&mut self, ident: String) -> Expr {
         // function call
