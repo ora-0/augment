@@ -1,5 +1,5 @@
 use crate::parser::*;
-use std::collections::HashMap;
+use std::{collections::HashMap, vec::IntoIter};
 
 pub(crate) type Environment = HashMap<String, Value>;
 
@@ -120,44 +120,46 @@ fn evaluate_expression(expr: Expr, env: &Environment) -> Value {
 }
 
 // this
-pub(crate) fn augment(contents: Contents, env: &mut Environment) -> String {
+type ContentIter = IntoIter<Content>;
+pub(crate) fn augment(contents: &mut ContentIter, env: &mut Environment) -> String {
     let mut last_if_state = false;
-    contents
-        .into_iter()
-        .map(|thing| {
-            let (string, state) = augment_one(thing, env, last_if_state);
-            last_if_state = state;
-            string
-        })
-        .collect()
+    let mut templated = String::new();
+    while let Some((string, state)) = augment_one(contents, env, last_if_state) {
+        templated += &string;
+        last_if_state = state;
+    }
+    templated
 }
 
-fn augment_one(thing: Content, env: &mut Environment, last_condition_is_true: bool) -> (String, bool) {
+fn augment_one(contents: &mut ContentIter, env: &mut Environment, last_condition_is_true: bool) -> Option<(String, bool)> {
     use crate::parser::Block::*;
     use crate::parser::Content::*;
-    match thing {
-        Markup(content) => (content.to_owned(), false),
+    let next = contents.next()?;
+    match next {
+        Markup(content) => Some((content, false)),
+
         Block {
             kind: block @ (Else | If { .. } | ElseIf { .. }),
-            body,
-        } => augment_if(block, body, env, last_condition_is_true),
+        } => Some(augment_if(contents, block, env, last_condition_is_true)),
         Block {
             kind: For { element, iterable },
-            body,
-        } => (augment_for(element, iterable, body, env), false),
-        Expression(expr) => (evaluate_expression(expr, env).clone_to_string(), false),
+        } => Some((augment_for(contents, element, iterable, env), false)),
+        EndBlock => None,
+
+        Expression(expr) => Some((evaluate_expression(expr, env).clone_to_string(), false)),
+
         Keys(idents) => {
             idents.into_iter().enumerate().for_each(|(i, ident)| {
                 env.insert(ident, Value::Number(i as f32));
             });
-            ("".to_owned(), false)
+            Some(("".to_owned(), false))
         }
     }
 }
 
 fn augment_if(
+    body: &mut ContentIter,
     block: Block,
-    body: Contents,
     env: &mut Environment,
     last_condition_is_true: bool,
 ) -> (String, bool) {
@@ -184,7 +186,7 @@ fn augment_if(
     }
 }
 
-fn augment_for(element: Value, iterable: Value, body: Contents, env: &mut Environment) -> String {
+fn augment_for(body: &mut ContentIter, element: Value, iterable: Value, env: &mut Environment) -> String {
     let Value::Variable(element_ident) = element else {
         unreachable!()
     };
@@ -207,7 +209,7 @@ fn augment_for(element: Value, iterable: Value, body: Contents, env: &mut Enviro
         .iter()
         .map(|value| {
             *env.get_mut(&element_ident).unwrap() = value.clone();
-            augment(body.clone(), env)
+            augment(body, env)
         })
         .collect()
 }

@@ -115,7 +115,8 @@ fn main() -> io::Result<()> {
     let result = parser.execute(result);
     // println!("{result:#?}");
 
-    let result = augment(result, &mut environment);
+    let mut it = result.into_iter();
+    let result = augment(&mut it, &mut environment);
     println!("{result}");
 
     Ok(())

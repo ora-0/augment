@@ -1,6 +1,7 @@
 /target
 out
 *.txt
+benchmark.*
 test.html
 test.sh
 .DS_Store

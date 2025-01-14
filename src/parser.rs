@@ -8,7 +8,8 @@ pub(crate) enum Content {
     Markup(String),
     Expression(Expr),
     Keys(Vec<String>),
-    Block { kind: Block, body: Contents },
+    Block { kind: Block },
+    EndBlock,
 }
 
 #[derive(Debug, Clone)]
@@ -196,7 +197,6 @@ pub(crate) struct Parser {
     template: Vec<Token>,
     ast: Contents,
     current: usize,
-    nesting_path: Vec<usize>,
 }
 
 impl Parser {
@@ -205,7 +205,6 @@ impl Parser {
             template: Vec::new(),
             ast: Vec::new(),
             current: 0,
-            nesting_path: Vec::new(),
         }
     }
 
@@ -238,27 +237,6 @@ impl Parser {
         let token = mem::replace(current, Token::CParen);
         self.current += 1;
         Some(token)
-    }
-
-    fn get_last_block_added(&mut self) -> &mut Contents {
-        let mut last = &mut self.ast;
-        for &index in &self.nesting_path {
-            let Content::Block { ref mut body, .. } = last[index] else {
-                unreachable!()
-            };
-            last = body;
-        }
-        last
-    }
-
-    // modifies the nesting_path to point to the new block
-    fn increase_nesting(&mut self) {
-        let length = self.get_last_block_added().len() - 1;
-        self.nesting_path.push(length);
-    }
-
-    fn decrease_nesting(&mut self) {
-        self.nesting_path.pop();
     }
 
     fn parse_identifier(&mut self, ident: String) -> Expr {
@@ -424,7 +402,6 @@ impl Parser {
                 kind: Block::If {
                     condition: self.parse_logical(),
                 },
-                body: Vec::new(),
             }
         } else if self.next_if(Token::For) {
             // NOTE: the self.expect function only compares the enum variant, and not the insides.
@@ -441,17 +418,15 @@ impl Parser {
                     element: Value::Variable(element_ident),
                     iterable: Value::Variable(iterable_ident),
                 },
-                body: Vec::new(),
             }
         } else {
             panic!("Expected if or for");
         };
-        self.get_last_block_added().push(declaration);
-        self.increase_nesting();
+        self.ast.push(declaration);
     }
 
     fn parse_else_declaration(&mut self) {
-        self.decrease_nesting();
+        self.ast.push(Content::EndBlock);
         self.expect(Token::Else).expect("Expected else statement");
 
         let declaration = if self.next_if(Token::If) {
@@ -459,17 +434,12 @@ impl Parser {
                 kind: Block::ElseIf {
                     condition: self.parse_logical(),
                 },
-                body: Vec::new(),
             }
         } else {
-            Content::Block {
-                kind: Block::Else,
-                body: Vec::new(),
-            }
+            Content::Block { kind: Block::Else }
         };
 
-        self.get_last_block_added().push(declaration);
-        self.increase_nesting();
+        self.ast.push(declaration);
     }
 
     fn parse_statement(&mut self) {
@@ -481,7 +451,7 @@ impl Parser {
             };
             idents.push(ident)
         }
-        self.get_last_block_added().push(Content::Keys(idents));
+        self.ast.push(Content::Keys(idents));
     }
 
     fn parse_template(&mut self) {
@@ -490,19 +460,19 @@ impl Parser {
         } else if self.next_if(Token::Colon) {
             self.parse_else_declaration();
         } else if self.next_if(Token::Slash) {
-            self.decrease_nesting();
+            self.ast.push(Content::EndBlock);
         } else if self.next_if(Token::At) {
             self.parse_statement();
         } else {
             let expr = Content::Expression(self.parse_logical());
-            self.get_last_block_added().push(expr);
+            self.ast.push(expr);
         }
     }
 
     pub(crate) fn execute(mut self, content: Vec<DocumentKind>) -> Contents {
         content.into_iter().for_each(|thing| {
             if let DocumentKind::Markup(text) = thing {
-                self.get_last_block_added().push(Content::Markup(text));
+                self.ast.push(Content::Markup(text));
                 return;
             }
 
