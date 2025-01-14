@@ -3,7 +3,7 @@ mod parser;
 use lexer::Lexer;
 use parser::{Parser, Value};
 mod template;
-use std::{collections::HashMap, env, fs::read_to_string, io::{self, stdin, Read}, rc::Rc};
+use std::{collections::HashMap, env, fs::read_to_string, io::{self, stdin, Read}};
 use template::augment;
 
 fn parse_value(value: &str) -> Value {
@@ -60,7 +60,7 @@ fn parse_array(inner: &mut impl Iterator<Item = char>) -> Value {
         }
         value.push(char);
     }
-    return Value::Array(Rc::new(vec));
+    return Value::Array(vec.into());
 }
 
 fn parse_argument(param: String) -> (String, Value) {

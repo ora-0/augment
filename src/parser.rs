@@ -35,7 +35,7 @@ pub(crate) enum Value {
     Number(f32),
     String(Rc<str>),
     Variable(String),
-    Array(Rc<Vec<Value>>), // this is only possible via the environment
+    Array(Rc<[Value]>), // this is only possible via the environment
     Null,
 }
 
@@ -79,7 +79,7 @@ impl Value {
         panic!("Expected number, got {:?}", self);
     }
 
-    pub(crate) fn unwrap_array(self) -> Rc<Vec<Value>> {
+    pub(crate) fn unwrap_array(self) -> Rc<[Value]> {
         if let Self::Array(content) = self {
             return content;
         }
