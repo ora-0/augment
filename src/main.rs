@@ -109,7 +109,7 @@ fn main() -> io::Result<()> {
 
     // use std::time::Instant;
     // let before = Instant::now();
-    let mut lexer = Lexer::new(contents.to_owned());
+    let mut lexer = Lexer::new(contents);
     let result = lexer.execute();
     // println!("{:?}", Instant::now() - before);
 
@@ -124,24 +124,3 @@ fn main() -> io::Result<()> {
 
     Ok(())
 }
-
-
-    /*
-        let test = r#"
-        {#if 12 > (1 + 5 * 4) * -5}
-            <p>yea huh</p>
-            {#for user in users}
-                <p>{user}</p>
-            {/}
-        {:else if cond}
-            <p>maybe</p>
-        {:else}
-            <p>no</p>
-        {/}
-    "#;
-        let test1 = "{(true & false) | 5 > 4 | false}";
-        let test2 = "{!(1+!4)}";
-        let test3 = "{cond ++ \"hello\"} {v}";
-        let test4 = "{users[len(users) - 1]}";
-        let test5 = "{pow(5,3)}";
-    */
