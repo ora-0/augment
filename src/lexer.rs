@@ -233,28 +233,30 @@ impl Lexer {
     }
 
     fn read_until(&mut self, target: char) -> Result<String, String> {
-        let mut string = String::new();
+        let start = self.current;
         while let Some(char) = self.next_char() {
             if char == target {
-                return Ok(string);
+                let end = self.current - 1;
+                return Ok(self.contents[start..end].to_owned());
             }
-            string.push(char);
         }
 
-        Err(string)
+        let end = self.current - 1;
+        Err(self.contents[start..end].to_owned())
     }
 
-    fn read_while(&mut self, predicate: fn(char) -> bool) -> String {
-        let mut string = String::new();
+    fn read_while(&mut self, predicate: impl Fn(char) -> bool) -> String {
+        let start = self.current;
         while let Some(char) = self.peek_char() {
             if !predicate(char) {
-                return string;
+                let end = self.current;
+                return self.contents[start..end].to_owned();
             }
             self.current += 1;
-            string.push(char);
         }
 
-        string
+        let end = self.current;
+        return self.contents[start..end].to_owned();
     }
 }
 

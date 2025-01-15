@@ -107,13 +107,16 @@ fn main() -> io::Result<()> {
         }
     }
 
+    // use std::time::Instant;
+    // let before = Instant::now();
     let mut lexer = Lexer::new(contents.to_owned());
     let result = lexer.execute();
-    // println!("{result:#?}");
+    // println!("{:?}", Instant::now() - before);
 
+    // let before = Instant::now();
     let parser = Parser::new();
     let result = parser.execute(result);
-    // println!("{result:#?}");
+    // println!("{:?}", Instant::now() - before);
 
     let mut it = result.into_iter();
     let result = augment(&mut it, &mut environment);
