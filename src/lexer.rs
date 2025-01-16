@@ -46,32 +46,36 @@ pub(crate) enum DocumentKind {
 }
 
 pub(crate) struct Lexer {
-    contents: String,
+    contents: Box<[u8]>,
     current: usize,
 }
 
 impl Lexer {
     pub fn new(contents: String) -> Self {
         Lexer {
-            contents,
+            // Converting to a u8 slice, so that array access is O(1).
+            // Previously, to index into `contents`, the code used
+            // `content.chars().nth(i)`, which has to account for UTF-8
+            // strings, thus making array access O(n).
+            contents: contents.as_bytes().into(),
             current: 0,
         }
     }
 
     fn next_char(&mut self) -> Option<char> {
-        let result = self.contents.chars().nth(self.current);
+        let char = self.contents.iter().nth(self.current).map(|c| *c as char);
         self.current += 1;
-        result
+        char
     }
 
     fn peek_char(&self) -> Option<char> {
-        self.contents.chars().nth(self.current)
+        self.contents.iter().nth(self.current).map(|c| *c as char)
     }
 
     fn peek_pair(&self) -> (Option<char>, Option<char>) {
         (
-            self.contents.chars().nth(self.current),
-            self.contents.chars().nth(self.current + 1),
+            self.contents.iter().nth(self.current).map(|c| *c as char),
+            self.contents.iter().nth(self.current + 1).map(|c| *c as char),
         )
     }
 
@@ -237,12 +241,12 @@ impl Lexer {
         while let Some(char) = self.next_char() {
             if char == target {
                 let end = self.current - 1;
-                return Ok(self.contents[start..end].to_owned());
+                return Ok(String::from_utf8_lossy(&self.contents[start..end]).into_owned());
             }
         }
 
         let end = self.current - 1;
-        Err(self.contents[start..end].to_owned())
+        Err(String::from_utf8_lossy(&self.contents[start..end]).into_owned())
     }
 
     fn read_while(&mut self, predicate: impl Fn(char) -> bool) -> String {
@@ -250,13 +254,13 @@ impl Lexer {
         while let Some(char) = self.peek_char() {
             if !predicate(char) {
                 let end = self.current;
-                return self.contents[start..end].to_owned();
+                return String::from_utf8_lossy(&self.contents[start..end]).into_owned();
             }
             self.current += 1;
         }
 
         let end = self.current;
-        return self.contents[start..end].to_owned();
+        String::from_utf8_lossy(&self.contents[start..end]).into_owned()
     }
 }
 

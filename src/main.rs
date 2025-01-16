@@ -113,13 +113,14 @@ fn main() -> io::Result<()> {
     let result = lexer.execute();
     // println!("{:?}", Instant::now() - before);
 
-    // let before = Instant::now();
     let parser = Parser::new();
     let result = parser.execute(result);
-    // println!("{:?}", Instant::now() - before);
 
     let mut it = result.into_iter();
     let result = augment(&mut it, &mut environment);
+    // use std::hint::black_box;
+    // black_box(result);
+
     println!("{result}");
 
     Ok(())
