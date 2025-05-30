@@ -8,7 +8,13 @@ edition = "2021"
 [profile.release]
 lto = true
 strip = true
-# panic = "abort"
+panic = "abort"
+
+[profile.trace]
+inherits = "release"
+debug = true
+strip = "none"
+# split-debuginfo = "packed"
 
 [lints.clippy]
 needless_return = "allow"

@@ -3,8 +3,8 @@ mod parser;
 use lexer::Lexer;
 use parser::{Parser, Value};
 mod template;
-use std::{collections::HashMap, env, fs::read_to_string, io::{self, stdin, Read}};
-use template::augment;
+use std::{collections::HashMap, env, fs::read_to_string, io::{self, stdin, Read}, path::PathBuf};
+use template::{augment, Environment};
 
 fn parse_value(value: &str) -> Value {
     // eprintln!("{value}");
@@ -82,15 +82,35 @@ fn read_from_stdin() -> String {
     }
 }
 
+/// returns (the file templated, the base template that this one extends from)
+fn template_a_file(contents: String, environment: &mut Environment) -> (String, Option<PathBuf>) {
+    // use std::time::Instant;
+    // let before = Instant::now();
+    let mut lexer = Lexer::new(contents);
+    let result = lexer.execute();
+    // println!("{:?}", Instant::now() - before);
+
+    let parser = Parser::new();
+    let (result, base_template) = parser.execute(result);
+
+    let mut it = result.into_iter();
+    let result = augment(&mut it, environment);
+
+    (result, base_template)
+}
+
 fn main() -> io::Result<()> {
     let mut arguments = env::args().peekable();
     arguments.next();
 
     let mut environment = HashMap::new();
+    environment.insert("slot".to_owned(), Value::String("".into()));
+
+    // parse cmd line arguments
     let mut advance = false;
     let contents = arguments.peek().map(|argument| {
         if argument.starts_with('-') {
-            return read_from_stdin()
+            return read_from_stdin();
         }
 
         advance = true;
@@ -107,21 +127,17 @@ fn main() -> io::Result<()> {
         }
     }
 
-    // use std::time::Instant;
-    // let before = Instant::now();
-    let mut lexer = Lexer::new(contents);
-    let result = lexer.execute();
-    // println!("{:?}", Instant::now() - before);
-
-    let parser = Parser::new();
-    let result = parser.execute(result);
-
-    let mut it = result.into_iter();
-    let result = augment(&mut it, &mut environment);
-    // use std::hint::black_box;
-    // black_box(result);
-
-    println!("{result}");
+    let mut to_be_templated = contents;
+    loop {
+        let (result, base_template) = template_a_file(to_be_templated, &mut environment);
+        if let Some(path) = base_template {
+            to_be_templated = read_to_string(path).unwrap();
+            environment.insert("slot".to_owned(), Value::String(result.into()));
+        } else {
+            println!("{result}");
+            break;
+        }
+    }
 
     Ok(())
 }

@@ -1,8 +1,5 @@
 /target
 out
-*.txt
-benchmark.*
-test.html
-test.sh
+/testing
 .DS_Store
 Cargo.lock

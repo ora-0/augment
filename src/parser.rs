@@ -1,5 +1,5 @@
 use crate::lexer::{DocumentKind, Token};
-use std::{mem, rc::Rc};
+use std::{mem, path::PathBuf, rc::Rc};
 
 pub(crate) type Contents = Vec<Content>;
 
@@ -197,6 +197,7 @@ pub(crate) struct Parser {
     template: Vec<Token>,
     ast: Contents,
     current: usize,
+    base_template: Option<PathBuf>,
 }
 
 impl Parser {
@@ -205,6 +206,7 @@ impl Parser {
             template: Vec::new(),
             ast: Vec::new(),
             current: 0,
+            base_template: None,
         }
     }
 
@@ -443,15 +445,26 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) {
-        self.expect(Token::Keys).expect("Expected keyword keys");
-        let mut idents = Vec::new();
-        while let Some(ident) = self.next_and_take() {
-            let Token::Ident(ident) = ident else {
-                panic!("Expected identifier, found {:?}", ident);
+        if self.next_if(Token::Keys) {
+            let mut idents = Vec::new();
+            while let Some(ident) = self.next_and_take() {
+                let Token::Ident(ident) = ident else {
+                    panic!("Expected identifier, found {:?}", ident);
+                };
+                idents.push(ident)
+            }
+            self.ast.push(Content::Keys(idents));
+        } else if self.next_if(Token::Base) {
+            if self.base_template.is_some() {
+                panic!("There may only be one @base statement per file")
+            }
+
+            let Expr::Value(Value::String(path)) = self.parse_expression() else {
+                panic!("@base statement needs to take in a string as argument. For example `@base \"./file.html\"");
             };
-            idents.push(ident)
+
+            self.base_template = Some(PathBuf::from(path.as_ref()));
         }
-        self.ast.push(Content::Keys(idents));
     }
 
     fn parse_template(&mut self) {
@@ -469,7 +482,7 @@ impl Parser {
         }
     }
 
-    pub(crate) fn execute(mut self, content: Vec<DocumentKind>) -> Contents {
+    pub(crate) fn execute(mut self, content: Vec<DocumentKind>) -> (Contents, Option<PathBuf>) {
         content.into_iter().for_each(|thing| {
             if let DocumentKind::Markup(text) = thing {
                 self.ast.push(Content::Markup(text));
@@ -484,7 +497,7 @@ impl Parser {
             }
         });
 
-        self.ast
+        (self.ast, self.base_template)
     }
 }
 

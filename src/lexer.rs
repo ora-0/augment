@@ -35,6 +35,7 @@ pub(crate) enum Token {
     Number(f32),
     String(String),
     Keys,
+    Base,
 }
 
 type Template = Vec<Token>;
@@ -88,6 +89,7 @@ impl Lexer {
             "for" => Token::For,
             "in" => Token::In,
             "keys" => Token::Keys,
+            "base" => Token::Base,
             "true" => Token::Boolean(true),
             "false" => Token::Boolean(false),
             _ => Token::Ident(string),
