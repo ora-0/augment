@@ -53,10 +53,6 @@ pub(crate) struct Lexer<T: Iterator<Item = char>> {
 impl<T: Iterator<Item = char>> Lexer<T> {
     pub fn new(contents: impl IntoIterator<IntoIter = T>) -> Self {
         Lexer {
-            // Converting to a u8 slice, so that array access is O(1).
-            // Previously, to index into `contents`, the code used
-            // `content.chars().nth(i)`, which has to account for UTF-8
-            // strings, thus making array access O(n).
             contents: contents.into_iter().peekable(),
         }
     }
