@@ -1,4 +1,4 @@
-use std::{char, panic};
+use std::{char, iter::Peekable, panic};
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Token {
@@ -46,38 +46,19 @@ pub(crate) enum DocumentKind {
     Template(Template),
 }
 
-pub(crate) struct Lexer {
-    contents: Box<[u8]>,
-    current: usize,
+pub(crate) struct Lexer<T: Iterator<Item = char>> {
+    contents: Peekable<T>,
 }
 
-impl Lexer {
-    pub fn new(contents: String) -> Self {
+impl<T: Iterator<Item = char>> Lexer<T> {
+    pub fn new(contents: impl IntoIterator<IntoIter = T>) -> Self {
         Lexer {
             // Converting to a u8 slice, so that array access is O(1).
             // Previously, to index into `contents`, the code used
             // `content.chars().nth(i)`, which has to account for UTF-8
             // strings, thus making array access O(n).
-            contents: contents.as_bytes().into(),
-            current: 0,
+            contents: contents.into_iter().peekable(),
         }
-    }
-
-    fn next_char(&mut self) -> Option<char> {
-        let char = self.contents.iter().nth(self.current).map(|c| *c as char);
-        self.current += 1;
-        char
-    }
-
-    fn peek_char(&self) -> Option<char> {
-        self.contents.iter().nth(self.current).map(|c| *c as char)
-    }
-
-    fn peek_pair(&self) -> (Option<char>, Option<char>) {
-        (
-            self.contents.iter().nth(self.current).map(|c| *c as char),
-            self.contents.iter().nth(self.current + 1).map(|c| *c as char),
-        )
     }
 
     fn next_ident(&mut self) -> Token {
@@ -115,11 +96,11 @@ impl Lexer {
     }
 
     fn next_string(&mut self) -> Token {
-        self.current += 1;
+        self.contents.next();
         let mut string = String::new();
         let mut backslash_found = false;
-        while let Some(char) = self.peek_char() {
-            self.current += 1;
+        while let Some(&char) = self.contents.peek() {
+            self.contents.next();
             if backslash_found {
                 string.push(Self::unescape(char));
                 backslash_found = false;
@@ -140,7 +121,7 @@ impl Lexer {
     }
 
     fn next_literal(&mut self) -> Token {
-        if let Some(peek) = self.peek_char() {
+        if let Some(&peek) = self.contents.peek() {
             if peek == '"' {
                 return self.next_string();
             } else if peek.is_numeric() {
@@ -154,22 +135,29 @@ impl Lexer {
 
     fn next_token(&mut self) -> Option<Token> {
         self.skip_whitespace();
-        let (first, second) = self.peek_pair();
-        let result = match (first?, second) {
+        // let (first, second) = self.peek_pair();
+        let &first = self.contents.peek()?;
+        if matches!(first, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '"')  {
+            return Some(self.next_literal());
+        }
+
+        self.contents.next();
+        let second = self.contents.peek();
+        let result = match (first, second) {
             ('!', Some('=')) => {
-                self.current += 1;
+                self.contents.next();
                 Some(Token::NotEquals)
             }
             ('<', Some('=')) => {
-                self.current += 1;
+                self.contents.next();
                 Some(Token::LessThanOrEquals)
             }
             ('>', Some('=')) => {
-                self.current += 1;
+                self.contents.next();
                 Some(Token::GreaterThanOrEquals)
             }
             ('+', Some('+')) => {
-                self.current += 1;
+                self.contents.next();
                 Some(Token::Concat)
             }
         
@@ -194,12 +182,9 @@ impl Lexer {
             (']', _) => Some(Token::CBracket),
             ('}', _) => None,
 
-            // having return here skips `self.current += 1` below the match stmt
-            ('a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '"', _) => return Some(self.next_literal()),
             (first, _) => panic!("Unexpected character in template: {}", first),
         };
 
-        self.current += 1;
         result
     }
 
@@ -214,12 +199,10 @@ impl Lexer {
     pub fn execute(&mut self) -> Vec<DocumentKind> {
         let mut tokens = Vec::new();
         loop {
-            match self.read_until('{') {
-                Ok(before) => tokens.push(DocumentKind::Markup(before)),
-                Err(before) => {
-                    tokens.push(DocumentKind::Markup(before));
-                    break;
-                }
+            let before = self.read_until('{');
+            tokens.push(DocumentKind::Markup(before));
+            if self.contents.peek().is_none() {
+                break;
             }
 
             let template = self.next_template();
@@ -230,39 +213,25 @@ impl Lexer {
     }
 
     fn skip_whitespace(&mut self) {
-        while let Some(char) = self.peek_char() {
+        while let Some(char) = self.contents.peek() {
             if !char.is_whitespace() {
                 return;
             }
-            self.current += 1;
+            self.contents.next();
         }
     }
 
-    fn read_until(&mut self, target: char) -> Result<String, String> {
-        let start = self.current;
-        while let Some(char) = self.next_char() {
-            if char == target {
-                let end = self.current - 1;
-                return Ok(String::from_utf8_lossy(&self.contents[start..end]).into_owned());
-            }
-        }
-
-        let end = self.current - 1;
-        Err(String::from_utf8_lossy(&self.contents[start..end]).into_owned())
+    fn read_until(&mut self, target: char) -> String {
+        self.contents.by_ref().take_while(|c| *c != target).collect()
     }
 
     fn read_while(&mut self, predicate: impl Fn(char) -> bool) -> String {
-        let start = self.current;
-        while let Some(char) = self.peek_char() {
-            if !predicate(char) {
-                let end = self.current;
-                return String::from_utf8_lossy(&self.contents[start..end]).into_owned();
-            }
-            self.current += 1;
+        let mut acc = String::new();
+        while let Some(char) = self.contents.next_if(|c| predicate(*c)) {
+            acc.push(char)
         }
 
-        let end = self.current;
-        String::from_utf8_lossy(&self.contents[start..end]).into_owned()
+        acc
     }
 }
 
@@ -273,7 +242,7 @@ mod tests {
     #[test]
     fn categorizes_markup_and_templates() {
         let contents = "markup{}end".to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         assert_eq!(lexer.execute(), vec![
             DocumentKind::Markup("markup".to_owned()),
             DocumentKind::Template(vec![]),
@@ -284,7 +253,7 @@ mod tests {
     #[test]
     fn lexes_multiple_templates() {
         let contents = "markup 1: {}markup 2: {}markup 3: {}".to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         assert_eq!(lexer.execute(), vec![
             DocumentKind::Markup("markup 1: ".to_owned()),
             DocumentKind::Template(vec![]),
@@ -299,7 +268,7 @@ mod tests {
     #[test]
     fn skips_whitespace_and_recongnizes_idents() {
         let contents = "{      variable_1       }".to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         assert_eq!(lexer.execute(), vec![
             DocumentKind::Markup("".to_owned()),
             DocumentKind::Template(vec![Token::Ident("variable_1".to_owned())]),
@@ -310,7 +279,7 @@ mod tests {
     #[test]
     fn recognizes_string() {
         let contents = r#"{"lorem ipsum"}"#.to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         assert_eq!(lexer.execute(), vec![
             DocumentKind::Markup("".to_owned()),
             DocumentKind::Template(vec![Token::String("lorem ipsum".to_owned())]),
@@ -321,7 +290,7 @@ mod tests {
     #[test]
     fn recognizes_escaped_string() {
         let contents = r#"{"\"lorem\\ipsum\"\n"}"#.to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         assert_eq!(lexer.execute(), vec![
             DocumentKind::Markup("".to_owned()),
             DocumentKind::Template(vec![Token::String("\"lorem\\ipsum\"\n".to_owned())]),
@@ -333,14 +302,14 @@ mod tests {
     #[should_panic]
     fn panics_on_deformed_escape_char() {
         let contents = r#"{\q}"#.to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         lexer.execute();
     }
 
     #[test]
     fn recognizes_number() {
         let contents = "{23491.23}".to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         assert_eq!(lexer.execute(), vec![
             DocumentKind::Markup("".to_owned()),
             DocumentKind::Template(vec![Token::Number(23491.23)]),
@@ -352,14 +321,14 @@ mod tests {
     #[should_panic]
     fn panics_on_deformed_number() {
         let contents = "{2s3491.23}".to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         lexer.execute();
     }
 
     #[test]
     fn recognizes_boolean() {
         let contents = "{true} {false}".to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         assert_eq!(lexer.execute(), vec![
             DocumentKind::Markup("".to_owned()),
             DocumentKind::Template(vec![Token::Boolean(true)]),
@@ -372,7 +341,7 @@ mod tests {
     #[test]
     fn recognizes_keywords() {
         let contents = "{if else for in keys}".to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         assert_eq!(lexer.execute(), vec![
             DocumentKind::Markup("".to_owned()),
             DocumentKind::Template(vec![
@@ -389,7 +358,7 @@ mod tests {
     #[test]
     fn recognizes_tokens() {
         let contents = "{#:/@}".to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         assert_eq!(lexer.execute(), vec![
             DocumentKind::Markup("".to_owned()),
             DocumentKind::Template(vec![
@@ -405,7 +374,7 @@ mod tests {
     #[test]
     fn recognizes_two_length_tokens() {
         let contents = "{<= >= != ++}".to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         assert_eq!(lexer.execute(), vec![
             DocumentKind::Markup("".to_owned()),
             DocumentKind::Template(vec![
@@ -421,7 +390,7 @@ mod tests {
     #[test]
     fn bunch_of_stuff() {
         let contents = "{#if len(list) > 4 & true}and {\"yes \" ++ \"it works\"}.{:else}no{/}".to_owned();
-        let mut lexer = Lexer::new(contents);
+        let mut lexer = Lexer::new(contents.chars());
         assert_eq!(lexer.execute(), vec![
             DocumentKind::Markup("".to_owned()),
             DocumentKind::Template(vec![
