@@ -1,11 +1,11 @@
 use crate::lexer::{DocumentKind, Token};
 use std::{mem, path::PathBuf, rc::Rc};
 
-pub(crate) type Contents = Vec<Content>;
+pub(crate) type Contents<'a> = Vec<Content<'a>>;
 
 #[derive(Debug, Clone)]
-pub(crate) enum Content {
-    Markup(String),
+pub(crate) enum Content<'a> {
+    Markup(&'a str),
     Expression(Expr),
     Keys(Vec<String>),
     Block { kind: Block },
@@ -193,14 +193,14 @@ impl Operation for UnaryOp {
     }
 }
 
-pub(crate) struct Parser {
+pub(crate) struct Parser<'a> {
     template: Vec<Token>,
-    ast: Contents,
+    ast: Contents<'a>,
     current: usize,
     base_template: Option<PathBuf>,
 }
 
-impl Parser {
+impl<'a> Parser<'a> {
     pub(crate) fn new() -> Self {
         Parser {
             template: Vec::new(),
@@ -482,7 +482,7 @@ impl Parser {
         }
     }
 
-    pub(crate) fn execute(mut self, content: Vec<DocumentKind>) -> (Contents, Option<PathBuf>) {
+    pub(crate) fn execute(mut self, content: Vec<DocumentKind<'a>>) -> (Contents<'a>, Option<PathBuf>) {
         content.into_iter().for_each(|thing| {
             if let DocumentKind::Markup(text) = thing {
                 self.ast.push(Content::Markup(text));

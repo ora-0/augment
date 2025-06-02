@@ -120,7 +120,7 @@ fn evaluate_expression(expr: Expr, env: &Environment) -> Value {
 }
 
 // this
-type ContentIter = IntoIter<Content>;
+type ContentIter<'a> = IntoIter<Content<'a>>;
 pub(crate) fn augment(contents: &mut ContentIter, env: &mut Environment) -> String {
     let mut last_if_state = false;
     let mut templated = String::new();
@@ -136,7 +136,7 @@ fn augment_one(contents: &mut ContentIter, env: &mut Environment, last_condition
     use crate::parser::Content::*;
     let next = contents.next()?;
     match next {
-        Markup(content) => Some((content, false)),
+        Markup(content) => Some((content.to_owned(), false)),
 
         Block {
             kind: block @ (Else | If { .. } | ElseIf { .. }),

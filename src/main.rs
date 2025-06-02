@@ -86,7 +86,7 @@ fn read_from_stdin() -> String {
 fn template_a_file(contents: String, environment: &mut Environment) -> (String, Option<PathBuf>) {
     // use std::time::Instant;
     // let before = Instant::now();
-    let mut lexer = Lexer::new(contents);
+    let mut lexer = Lexer::new(&contents);
     let result = lexer.execute();
     // println!("{:?}", Instant::now() - before);
 
