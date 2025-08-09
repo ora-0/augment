@@ -1,47 +1,50 @@
 use crate::lexer::{DocumentKind, Token};
+use crate::arena::{Arena, ArenaBox, ArenaVec};
 use std::{mem, path::PathBuf, rc::Rc};
 
 pub(crate) type Contents<'a> = Vec<Content<'a>>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum Content<'a> {
     Markup(&'a str),
-    Expression(Expr),
+    Expression(ExprRef<'a>),
     Keys(Vec<String>),
-    Block { kind: Block },
+    Block { kind: Block<'a> },
     EndBlock,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum Block {
+#[derive(Debug)]
+pub(crate) enum Block<'a> {
     If {
-        condition: Expr,
+        condition: ExprRef<'a>,
     },
     ElseIf {
-        condition: Expr,
+        condition: ExprRef<'a>,
     },
     Else,
     For {
-        // has to be an identifier
+        //  to be an identifier
         element: Value,
         iterable: Value,
     },
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum Expr {
+pub type ExprRef<'a> = ArenaBox<'a, Expr<'a>>;
+
+#[derive(Debug)]
+pub(crate) enum Expr<'a> {
     BinaryOp {
         kind: BinaryOp,
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
+        lhs: ExprRef<'a>,
+        rhs: ExprRef<'a>,
     },
     UnaryOp {
         kind: UnaryOp,
-        value: Box<Expr>,
+        value: ExprRef<'a>,
     },
     Function {
         ident: String,
-        arguments: Vec<Expr>,
+        arguments: ArenaVec<'a, ExprRef<'a>>,
     },
     Value(Value),
 }
@@ -198,15 +201,17 @@ pub(crate) struct Parser<'a> {
     ast: Contents<'a>,
     current: usize,
     base_template: Option<PathBuf>,
+    arena: &'a Arena<'a>,
 }
 
 impl<'a> Parser<'a> {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(arena: &'a Arena) -> Self {
         Parser {
             template: Vec::new(),
             ast: Vec::new(),
             current: 0,
             base_template: None,
+            arena: arena,
         }
     }
 
@@ -241,10 +246,10 @@ impl<'a> Parser<'a> {
         Some(token)
     }
 
-    fn parse_identifier(&mut self, ident: String) -> Expr {
+    fn parse_identifier(&mut self, ident: String) -> ExprRef<'a> {
         // function call
         if self.next_if(Token::OParen) {
-            let mut arguments = Vec::new();
+            let mut arguments = ArenaVec::new(self.arena);
             loop {
                 let argument = self.parse_expression();
                 arguments.push(argument);
@@ -255,7 +260,8 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect(Token::CParen).expect("Missing closing paren");
-            return Expr::Function { ident, arguments };
+
+            return ArenaBox::new(self.arena, Expr::Function { ident, arguments });
         }
 
         if self.next_if(Token::OBracket) {
@@ -264,8 +270,8 @@ impl<'a> Parser<'a> {
                 .expect("Missing closing bracket");
             let mut indexing_onion = Expr::BinaryOp {
                 kind: BinaryOp::Index,
-                lhs: Box::new(Expr::Value(Value::Variable(ident))),
-                rhs: Box::new(index),
+                lhs: ArenaBox::new(self.arena, Expr::Value(Value::Variable(ident))),
+                rhs: index,
             };
             while self.next_if(Token::OBracket) {
                 let index = self.parse_expression();
@@ -273,49 +279,51 @@ impl<'a> Parser<'a> {
                     .expect("Missing closing bracket");
                 indexing_onion = Expr::BinaryOp {
                     kind: BinaryOp::Index,
-                    lhs: Box::new(indexing_onion),
-                    rhs: Box::new(index),
+                    lhs: ArenaBox::new(self.arena, indexing_onion),
+                    rhs: index,
                 };
             }
-            return indexing_onion;
+            return ArenaBox::new(self.arena, indexing_onion);
         }
 
-        return Expr::Value(Value::Variable(ident));
+        return ArenaBox::new(self.arena, Expr::Value(Value::Variable(ident)));
     }
 
-    fn parse_factor(&mut self) -> Expr {
+    fn parse_factor(&mut self) -> ExprRef<'a> {
         if self.next_if(Token::Minus) {
-            return Expr::UnaryOp {
+            return ArenaBox::new(self.arena, Expr::UnaryOp {
                 kind: UnaryOp::Negate,
-                value: Box::new(self.parse_factor()),
-            };
+                value: self.parse_factor(),
+            });
         }
         if self.next_if(Token::Not) {
-            return Expr::UnaryOp {
+            return ArenaBox::new(self.arena, Expr::UnaryOp {
                 kind: UnaryOp::Not,
-                value: Box::new(self.parse_factor()),
-            };
+                value: self.parse_factor(),
+            });
         }
         if self.next_if(Token::OParen) {
             let inside = self.parse_logical();
             self.expect(Token::CParen).expect("Expected '('");
-            return Expr::UnaryOp {
+            return ArenaBox::new(self.arena, Expr::UnaryOp {
                 kind: UnaryOp::Dummy,
-                value: Box::new(inside),
-            };
+                value: inside,
+            });
         }
 
-        match self.next_and_take() {
+        let val = match self.next_and_take() {
             Some(Token::Ident(ident)) => return self.parse_identifier(ident),
-            Some(Token::String(content)) => return Expr::Value(Value::String(content.into())),
-            Some(Token::Boolean(bool)) => return Expr::Value(Value::Boolean(bool)),
-            Some(Token::Number(num)) => return Expr::Value(Value::Number(num)),
+            Some(Token::String(content)) => Value::String(content.into()),
+            Some(Token::Boolean(bool)) => Value::Boolean(bool),
+            Some(Token::Number(num)) => Value::Number(num),
             Some(_) => unreachable!(),
             None => panic!("Expected a value"),
-        }
+        };
+
+        ArenaBox::new(self.arena, Expr::Value(val))
     }
 
-    fn parse_term(&mut self) -> Expr {
+    fn parse_term(&mut self) -> ExprRef<'a> {
         let lhs = self.parse_factor();
 
         let kind = if self.next_if(Token::Asterisk) {
@@ -329,14 +337,14 @@ impl<'a> Parser<'a> {
         };
 
         let rhs = self.parse_term();
-        return Expr::BinaryOp {
+        ArenaBox::new(self.arena, Expr::BinaryOp {
             kind,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-        };
+            lhs,
+            rhs,
+        })
     }
 
-    fn parse_expression(&mut self) -> Expr {
+    fn parse_expression(&mut self) -> ExprRef<'a> {
         let lhs = self.parse_term();
 
         let kind = if self.next_if(Token::Plus) {
@@ -351,14 +359,14 @@ impl<'a> Parser<'a> {
         };
 
         let rhs = self.parse_expression();
-        return Expr::BinaryOp {
+        ArenaBox::new(self.arena, Expr::BinaryOp {
             kind,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-        };
+            lhs: lhs,
+            rhs: rhs,
+        })
     }
 
-    fn parse_condition(&mut self) -> Expr {
+    fn parse_condition(&mut self) -> ExprRef<'a> {
         let lhs = self.parse_expression();
         let kind = match self.peek() {
             Some(Token::Equals) => BinaryOp::Equals,
@@ -372,14 +380,14 @@ impl<'a> Parser<'a> {
         self.current += 1;
 
         let rhs = self.parse_expression();
-        Expr::BinaryOp {
+        ArenaBox::new(self.arena, Expr::BinaryOp {
             kind,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-        }
+            lhs,
+            rhs,
+        })
     }
 
-    fn parse_logical(&mut self) -> Expr {
+    fn parse_logical(&mut self) -> ExprRef<'a>{
         let lhs = self.parse_condition();
 
         let kind = if self.next_if(Token::And) {
@@ -391,11 +399,11 @@ impl<'a> Parser<'a> {
         };
 
         let rhs = self.parse_logical();
-        Expr::BinaryOp {
+        ArenaBox::new(self.arena, Expr::BinaryOp {
             kind,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-        }
+            lhs,
+            rhs,
+        })
     }
 
     fn parse_block_declaration(&mut self) {
@@ -459,7 +467,7 @@ impl<'a> Parser<'a> {
                 panic!("There may only be one @base statement per file")
             }
 
-            let Expr::Value(Value::String(path)) = self.parse_expression() else {
+            let Expr::Value(Value::String(ref path)) = *self.parse_expression() else {
                 panic!("@base statement needs to take in a string as argument. For example `@base \"./file.html\"");
             };
 

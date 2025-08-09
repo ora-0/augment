@@ -265,6 +265,10 @@ impl<'a> Lexer<'a> {
         template
     }
 
+    // pub fn execute(self: &'s mut Self<'a>) -> Vec<DocumentKind<'s>> {
+    // 1. 's |> return lives as long as &self lives
+    // 2. 'a |> data in self lives as long as self lives 
+    // 3. 'a: 's
     pub fn execute(&mut self) -> Vec<DocumentKind> {
         let mut tokens = Vec::new();
         loop {

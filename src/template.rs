@@ -1,9 +1,9 @@
-use crate::parser::*;
+use crate::{arena::ArenaVec, parser::*};
 use std::{borrow::Cow, collections::HashMap, vec::IntoIter};
 
 pub(crate) type Environment = HashMap<String, Value>;
 
-fn evaluate_arithmetic(kind: BinaryOp, lhs: Expr, rhs: Expr, env: &Environment) -> Value {
+fn evaluate_arithmetic(kind: BinaryOp, lhs: ExprRef, rhs: ExprRef, env: &Environment) -> Value {
     use BinaryOp as Op;
     use Value::*;
     let a = evaluate_expression(lhs, env).unwrap_number();
@@ -24,7 +24,7 @@ fn evaluate_arithmetic(kind: BinaryOp, lhs: Expr, rhs: Expr, env: &Environment) 
     };
 }
 
-fn evaluate_logic(kind: BinaryOp, lhs: Expr, rhs: Expr, env: &Environment) -> Value {
+fn evaluate_logic(kind: BinaryOp, lhs: ExprRef, rhs: ExprRef, env: &Environment) -> Value {
     use BinaryOp as Op;
     use Value::*;
     let a = evaluate_expression(lhs, env).unwrap_boolean();
@@ -36,7 +36,7 @@ fn evaluate_logic(kind: BinaryOp, lhs: Expr, rhs: Expr, env: &Environment) -> Va
     };
 }
 
-fn evaluate_concat(kind: BinaryOp, lhs: Expr, rhs: Expr, env: &Environment) -> Value {
+fn evaluate_concat(kind: BinaryOp, lhs: ExprRef, rhs: ExprRef, env: &Environment) -> Value {
     use BinaryOp as Op;
     use Value::*;
     let a = evaluate_expression(lhs, env).clone_to_string();
@@ -47,7 +47,7 @@ fn evaluate_concat(kind: BinaryOp, lhs: Expr, rhs: Expr, env: &Environment) -> V
     };
 }
 
-fn evaluate_index(lhs: Expr, rhs: Expr, env: &Environment) -> Value {
+fn evaluate_index(lhs: ExprRef, rhs: ExprRef, env: &Environment) -> Value {
     let list = evaluate_expression(lhs, env).unwrap_array();
     let index = evaluate_expression(rhs, env).unwrap_number();
     if index.is_sign_negative() {
@@ -56,7 +56,7 @@ fn evaluate_index(lhs: Expr, rhs: Expr, env: &Environment) -> Value {
     return list[index.trunc() as usize].clone();
 }
 
-fn evaluate_binary_op(kind: BinaryOp, lhs: Expr, rhs: Expr, env: &Environment) -> Value {
+fn evaluate_binary_op(kind: BinaryOp, lhs: ExprRef, rhs: ExprRef, env: &Environment) -> Value {
     if kind.takes_in_numbers() {
         return evaluate_arithmetic(kind, lhs, rhs, env);
     }
@@ -72,7 +72,7 @@ fn evaluate_binary_op(kind: BinaryOp, lhs: Expr, rhs: Expr, env: &Environment) -
     unreachable!()
 }
 
-fn evaluate_unary_op(kind: UnaryOp, value: Expr, env: &Environment) -> Value {
+fn evaluate_unary_op(kind: UnaryOp, value: ExprRef, env: &Environment) -> Value {
     use UnaryOp::*;
     match kind {
         Dummy => return evaluate_expression(value, env),
@@ -91,14 +91,14 @@ fn evaluate_unary_op(kind: UnaryOp, value: Expr, env: &Environment) -> Value {
     }
 }
 
-fn evaluate_function_call(ident: String, args: Vec<Expr>, env: &Environment) -> Value {
+fn evaluate_function_call(ident: String, args: ArenaVec<ExprRef>, env: &Environment) -> Value {
     // currently not very scalable
     // I'm planning to make a function struct and store them thereree
     match ident.as_ref() {
         "len" => {
             // make this better later
-            let mut args = args.into_iter().map(|arg| evaluate_expression(arg, env));
             assert_eq!(args.len(), 1);
+            let mut args = args.into_iter().map(|arg| evaluate_expression(arg, env));
             if let Some(Value::Array(array)) = args.next() {
                 return Value::Number(array.len() as f32);
             } else {
@@ -109,10 +109,10 @@ fn evaluate_function_call(ident: String, args: Vec<Expr>, env: &Environment) -> 
     }
 }
 
-fn evaluate_expression(expr: Expr, env: &Environment) -> Value {
-    match expr {
-        Expr::BinaryOp { kind, lhs, rhs } => evaluate_binary_op(kind, *lhs, *rhs, env),
-        Expr::UnaryOp { kind, value } => evaluate_unary_op(kind, *value, env),
+fn evaluate_expression(expr: ExprRef, env: &Environment) -> Value {
+    match expr.into_inner() {
+        Expr::BinaryOp { kind, lhs, rhs } => evaluate_binary_op(kind, lhs, rhs, env),
+        Expr::UnaryOp { kind, value } => evaluate_unary_op(kind, value, env),
         Expr::Value(Value::Variable(ident)) => env.get(&ident).unwrap_or(&Value::Null).clone(),
         Expr::Value(value) => value,
         Expr::Function { ident, arguments } => evaluate_function_call(ident, arguments, env),

@@ -1,8 +1,10 @@
 mod lexer;
 mod parser;
+mod arena;
+mod template;
+
 use lexer::Lexer;
 use parser::{Parser, Value};
-mod template;
 use std::{collections::HashMap, env, fs::read_to_string, io::{self, stdin, Read}, path::PathBuf};
 use template::{augment, Environment};
 
@@ -82,6 +84,8 @@ fn read_from_stdin() -> String {
     }
 }
 
+const ARENA_SIZE: usize = 8 * 1024;
+
 /// returns (the file templated, the base template that this one extends from)
 fn template_a_file(contents: String, environment: &mut Environment) -> (String, Option<PathBuf>) {
     // use std::time::Instant;
@@ -90,7 +94,8 @@ fn template_a_file(contents: String, environment: &mut Environment) -> (String, 
     let result = lexer.execute();
     // println!("{:?}", Instant::now() - before);
 
-    let parser = Parser::new();
+    let arena = arena::Arena::new(ARENA_SIZE);
+    let parser = Parser::new(&arena);
     let (result, base_template) = parser.execute(result);
 
     let mut it = result.into_iter();
