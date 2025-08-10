@@ -1,4 +1,3 @@
-#![allow(unused)]
 use core::str;
 use std::{alloc::{alloc, dealloc, Layout}, cell::Cell, fmt::Debug, marker::PhantomData, ops::{Deref, DerefMut}, ptr::{self, copy_nonoverlapping, read}, slice::{from_raw_parts, from_raw_parts_mut}};
 
@@ -196,7 +195,7 @@ impl<T> Iterator for IntoIter<T> {
 
 pub struct ArenaBox<'a, T> {
     mem: *mut T,
-    _arena: &'a PhantomData<T>,
+    _arena: PhantomData<&'a T>,
 }
 
 impl<'a, T> ArenaBox<'a, T> {
@@ -204,10 +203,11 @@ impl<'a, T> ArenaBox<'a, T> {
         let mem = arena.alloc(thing);
         ArenaBox {
             mem,
-            _arena: &PhantomData,
+            _arena: PhantomData,
         }
     }
 
+    #[inline]
     pub fn into_inner(self) -> T {
         unsafe {ptr::read(self.mem)}
     }
