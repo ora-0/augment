@@ -6,7 +6,7 @@ mod template;
 use lexer::Lexer;
 use parser::{Parser, Value};
 use std::{collections::HashMap, env, fs::read_to_string, io::{self, Read, stdin}, path::PathBuf, str::Chars};
-use template::{augment, Environment};
+use template::{Environment, Augment};
 
 fn parse_value(value: &str) -> Value {
     if value.starts_with('"') && value.ends_with('"') {
@@ -95,8 +95,9 @@ fn template_a_file(contents: String, environment: &mut Environment) -> (String, 
     let parser = Parser::new(&arena);
     let (result, base_template) = parser.execute(result);
 
-    let mut it = result.iter();
-    let result = augment(&mut it, environment);
+    let mut iter = result.iter();
+    let templater = Augment::new(&mut iter, environment);
+    let result = templater.execute();
 
     (result, base_template)
 }
