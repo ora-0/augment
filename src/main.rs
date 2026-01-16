@@ -5,36 +5,32 @@ mod template;
 
 use lexer::Lexer;
 use parser::{Parser, Value};
-use std::{collections::HashMap, env, fs::read_to_string, io::{self, stdin, Read}, path::PathBuf};
+use std::{collections::HashMap, env, fs::read_to_string, io::{self, Read, stdin}, path::PathBuf, str::Chars};
 use template::{augment, Environment};
 
 fn parse_value(value: &str) -> Value {
-    // eprintln!("{value}");
     if value.starts_with('"') && value.ends_with('"') {
-        let mut string = value.chars();
-        string.next();
-        string.next_back();
-        return Value::String(string.as_str().into());
+        Value::String(value[1..value.len()-1].into())
     } else if value.starts_with('[') && value.ends_with(']') {
-        let mut inner = value.chars().peekable();
+        let mut inner = value.chars();
         inner.next();
         inner.next_back();
-        return parse_array(&mut inner);
+        parse_array(&mut inner)
     } else if value.is_empty() {
-        return Value::Null;
+        Value::Null
     } else if value.starts_with(char::is_numeric) {
         let number = value.parse().expect("Failed to parse number");
-        return Value::Number(number);
+        Value::Number(number)
     } else {
         match value {
-            "true" => return Value::Boolean(true),
-            "false" => return Value::Boolean(false),
-            string => return Value::String(string.into()),
+            "true" => Value::Boolean(true),
+            "false" => Value::Boolean(false),
+            string => Value::String(string.into()),
         }
     }
 }
 
-fn parse_array(inner: &mut impl Iterator<Item = char>) -> Value {
+fn parse_array(inner: &mut Chars) -> Value {
     let mut vec = Vec::new();
     let mut value = String::new(); // can't use take_while() because it will consume the last character
     while let Some(char) = inner.next() {
@@ -62,7 +58,8 @@ fn parse_array(inner: &mut impl Iterator<Item = char>) -> Value {
         }
         value.push(char);
     }
-    return Value::Array(vec.into());
+
+    Value::Array(vec.into())
 }
 
 fn parse_argument(param: String) -> (String, Value) {
@@ -98,7 +95,7 @@ fn template_a_file(contents: String, environment: &mut Environment) -> (String, 
     let parser = Parser::new(&arena);
     let (result, base_template) = parser.execute(result);
 
-    let mut it = result.into_iter();
+    let mut it = result.iter();
     let result = augment(&mut it, environment);
 
     (result, base_template)

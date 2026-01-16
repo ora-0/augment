@@ -54,7 +54,7 @@ pub(crate) enum Value {
     Boolean(bool),
     Number(f32),
     String(Rc<str>),
-    Variable(String),
+    VarRef(String),
     Array(Rc<[Value]>), // this is only possible via the environment
     Null,
 }
@@ -69,7 +69,7 @@ impl Clone for Value {
             Self::Boolean(bool) => Self::Boolean(*bool),
             Self::Number(num) => Self::Number(*num),
             Self::String(contents) => Self::String(Rc::clone(contents)),
-            Self::Variable(ident) => Self::Variable(ident.clone()),
+            Self::VarRef(ident) => Self::VarRef(ident.clone()),
             Self::Array(vec) => Self::Array(Rc::clone(vec)),
             Self::Null => Self::Null,
         }
@@ -112,13 +112,13 @@ impl Value {
             Value::Number(num) => num.to_string(),
             Value::String(content) => content.to_string(),
             Value::Null => "null".to_owned(),
-            Value::Variable(_) => panic!(),
+            Value::VarRef(_) => panic!(),
             Value::Array(_) => panic!("Cannot convert array to string"),
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum BinaryOp {
     Add,
     Subtract,
@@ -137,7 +137,7 @@ pub(crate) enum BinaryOp {
     Index,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum UnaryOp {
     Dummy, // Brackets
     Not,
@@ -270,7 +270,7 @@ impl<'a> Parser<'a> {
                 .expect("Missing closing bracket");
             let mut indexing_onion = Expr::BinaryOp {
                 kind: BinaryOp::Index,
-                lhs: ArenaBox::new(self.arena, Expr::Value(Value::Variable(ident))),
+                lhs: ArenaBox::new(self.arena, Expr::Value(Value::VarRef(ident))),
                 rhs: index,
             };
             while self.next_if(Token::OBracket) {
@@ -286,7 +286,7 @@ impl<'a> Parser<'a> {
             return ArenaBox::new(self.arena, indexing_onion);
         }
 
-        return ArenaBox::new(self.arena, Expr::Value(Value::Variable(ident)));
+        return ArenaBox::new(self.arena, Expr::Value(Value::VarRef(ident)));
     }
 
     fn parse_factor(&mut self) -> ExprRef<'a> {
@@ -387,7 +387,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_logical(&mut self) -> ExprRef<'a>{
+    fn parse_logical(&mut self) -> ExprRef<'a> {
         let lhs = self.parse_condition();
 
         let kind = if self.next_if(Token::And) {
@@ -425,8 +425,8 @@ impl<'a> Parser<'a> {
 
             Content::Block {
                 kind: Block::For {
-                    element: Value::Variable(element_ident),
-                    iterable: Value::Variable(iterable_ident),
+                    element: Value::VarRef(element_ident),
+                    iterable: Value::VarRef(iterable_ident),
                 },
             }
         } else {

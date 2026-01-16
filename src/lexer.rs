@@ -50,6 +50,10 @@ pub(crate) struct Lexer<'a> {
     contents: UnsafeCell<&'a str>, // I'm sorry
 }
 
+enum Status {
+    Continue,
+    Eof,
+}
 impl<'a> Lexer<'a> {
     pub fn new(contents: &'a str) -> Self {
         Lexer {
@@ -96,19 +100,19 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn read_until(&self, target: char) -> Result<&str, &str> {
+    fn read_until(&self, target: char) -> (&'a str, Status) {
         let str = unsafe { &mut *self.contents.get() };
         let mut n = 0;
         while let Some(char) = self.nth(n) {
             if char == target {
-                let res = Ok(&str[0..n]);
+                let res = (&str[0..n], Status::Continue);
                 self.advance_n(n + 1); // +1 to skip the target character
                 return res;
             }
             n += 1;
         }
 
-        let res = Err(&str[0..n]);
+        let res = (&str[0..n], Status::Eof);
         self.advance_n(n);
         res
     }
@@ -269,12 +273,12 @@ impl<'a> Lexer<'a> {
     // 1. 's |> return lives as long as &self lives
     // 2. 'a |> data in self lives as long as self lives 
     // 3. 'a: 's
-    pub fn execute(&mut self) -> Vec<DocumentKind> {
+    pub fn execute(&mut self) -> Vec<DocumentKind<'a>> {
         let mut tokens = Vec::new();
         loop {
             match self.read_until('{') {
-                Ok(before) => tokens.push(DocumentKind::Markup(before)),
-                Err(before) => {
+                (before, Status::Continue) => tokens.push(DocumentKind::Markup(before)),
+                (before, Status::Eof) => {
                     tokens.push(DocumentKind::Markup(before));
                     break;
                 }

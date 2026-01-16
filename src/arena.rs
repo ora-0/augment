@@ -1,5 +1,7 @@
+#![allow(dead_code)]
+
 use core::str;
-use std::{alloc::{alloc, dealloc, Layout}, cell::Cell, fmt::Debug, marker::PhantomData, ops::{Deref, DerefMut}, ptr::{self, copy_nonoverlapping, read}, slice::{from_raw_parts, from_raw_parts_mut}};
+use std::{alloc::{alloc, dealloc, Layout}, cell::Cell, fmt::Debug, marker::PhantomData, ops::{Deref, DerefMut}, ptr::{self, copy_nonoverlapping}, slice::{from_raw_parts, from_raw_parts_mut}};
 
 #[inline]
 fn array<T>(n: usize) -> Layout {
@@ -149,6 +151,14 @@ impl<'a, T> ArenaVec<'a, T> {
     pub fn len(&self) -> usize {
         self.len
     }
+
+    pub fn iter(&self) -> Iter<'a, T> {
+        Iter {
+            start: self.mem,
+            end: unsafe { self.mem.add(self.len()) },
+            _iter: PhantomData,
+        }
+    }
 }
 
 impl<'a, T: Debug> Debug for ArenaVec<'a, T> {
@@ -163,25 +173,14 @@ impl<'a, T> AsRef<[T]> for ArenaVec<'a, T> {
     }
 }
 
-pub struct IntoIter<T> {
+pub struct Iter<'a, T> {
     start: *const T,
     end: *const T,
+    _iter: PhantomData<&'a T>
 }
 
-impl<'a, T> IntoIterator for ArenaVec<'a, T> {
-    type Item = T;
-    type IntoIter = IntoIter<T>;
-
-    fn into_iter(self) -> IntoIter<T> {
-        IntoIter {
-            start: self.mem,
-            end: unsafe { self.mem.add(self.len()) }
-        }
-    }
-}
-
-impl<T> Iterator for IntoIter<T> {
-    type Item = T;
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
         let next = unsafe { self.start.add(1) };
@@ -189,7 +188,7 @@ impl<T> Iterator for IntoIter<T> {
             return None;
         }
 
-        unsafe { Some(read(next)) }
+        unsafe { Some(&*next) }
     }
 }
 
