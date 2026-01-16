@@ -1,6 +1,6 @@
 use crate::lexer::{DocumentKind, Token};
 use crate::arena::{Arena, ArenaBox, ArenaVec};
-use std::{mem, path::PathBuf, rc::Rc};
+use std::{mem, path::PathBuf, rc::Rc, fmt::Write};
 
 pub(crate) type Contents<'a> = Vec<Content<'a>>;
 
@@ -112,6 +112,17 @@ impl Value {
             Value::Number(num) => num.to_string(),
             Value::String(content) => content.to_string(),
             Value::Null => "null".to_owned(),
+            Value::VarRef(_) => panic!(),
+            Value::Array(_) => panic!("Cannot convert array to string"),
+        }
+    }
+
+    pub(crate) fn write_to(self, buf: &mut String) {
+        match self {
+            Value::Boolean(bool) => write!(buf, "{bool}").unwrap(),
+            Value::Number(num) => write!(buf, "{num}").unwrap(),
+            Value::String(content) => buf.push_str(&content),
+            Value::Null => buf.push_str("null"),
             Value::VarRef(_) => panic!(),
             Value::Array(_) => panic!("Cannot convert array to string"),
         }

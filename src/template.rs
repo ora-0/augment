@@ -154,9 +154,7 @@ impl<'a> Augment<'a> {
                 Block { kind: For { element, iterable } } => self.augment_for(element, iterable),
                 EndBlock => return,
 
-                Expression(expr) => self.result_buf.push_str(
-                    &evaluate_expression(expr, self.env).clone_to_string()
-                ),
+                Expression(expr) => evaluate_expression(expr, self.env).write_to(&mut self.result_buf),
 
                 Keys(idents) => {
                     idents.into_iter().enumerate().for_each(|(i, ident)| {
