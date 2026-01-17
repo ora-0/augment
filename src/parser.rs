@@ -1,14 +1,12 @@
-use crate::lexer::{DocumentKind, Token};
+use crate::lexer::{DocumentKind, Template, Token};
 use crate::arena::{Arena, ArenaBox, ArenaVec};
-use std::{mem, path::PathBuf, rc::Rc, fmt::Write};
-
-pub(crate) type Contents<'a> = Vec<Content<'a>>;
+use std::{mem, path::PathBuf, fmt::Write};
 
 #[derive(Debug)]
 pub(crate) enum Content<'a> {
     Markup(&'a str),
     Expression(ExprRef<'a>),
-    Keys(Vec<String>),
+    Keys(ArenaVec<'a, &'a str>),
     Block { kind: Block<'a> },
     EndBlock,
 }
@@ -24,8 +22,8 @@ pub(crate) enum Block<'a> {
     Else,
     For {
         //  to be an identifier
-        element: Value,
-        iterable: Value,
+        element: Value<'a>,
+        iterable: Value<'a>,
     },
 }
 
@@ -43,40 +41,23 @@ pub(crate) enum Expr<'a> {
         value: ExprRef<'a>,
     },
     Function {
-        ident: String,
+        ident: &'a str,
         arguments: ArenaVec<'a, ExprRef<'a>>,
     },
-    Value(Value),
+    Value(Value<'a>),
 }
 
-#[derive(Debug)]
-pub(crate) enum Value {
+#[derive(Debug, Clone)]
+pub(crate) enum Value<'a> {
     Boolean(bool),
     Number(f32),
-    String(Rc<str>),
-    VarRef(String),
-    Array(Rc<[Value]>), // this is only possible via the environment
+    String(&'a str),
+    VarRef(&'a str),
+    Array(&'a [Value<'a>]), // this is only possible via the environment
     Null,
 }
 
-impl Clone for Value {
-    // I'm not sure if I can just derive this and it will automatically
-    // use the rc implementation for clone. (pretty sure it will)
-    // but this makes it more explicit that the clones aren't heavy
-    /// light clone
-    fn clone(&self) -> Self {
-        match self {
-            Self::Boolean(bool) => Self::Boolean(*bool),
-            Self::Number(num) => Self::Number(*num),
-            Self::String(contents) => Self::String(Rc::clone(contents)),
-            Self::VarRef(ident) => Self::VarRef(ident.clone()),
-            Self::Array(vec) => Self::Array(Rc::clone(vec)),
-            Self::Null => Self::Null,
-        }
-    }
-}
-
-impl Value {
+impl<'a> Value<'a> {
     pub(crate) fn unwrap_boolean(self) -> bool {
         if let Self::Boolean(content) = self {
             return content;
@@ -85,7 +66,7 @@ impl Value {
     }
 
     #[allow(unused)]
-    pub(crate) fn unwrap_string(self) -> Rc<str> {
+    pub(crate) fn unwrap_string(self) -> &'a str {
         if let Self::String(content) = self {
             return content;
         }
@@ -99,13 +80,14 @@ impl Value {
         panic!("Expected number, got {:?}", self);
     }
 
-    pub(crate) fn unwrap_array(self) -> Rc<[Value]> {
+    pub(crate) fn unwrap_array(self) -> &'a [Value<'a>] {
         if let Self::Array(content) = self {
             return content;
         }
         panic!("Expected array, got {:?}", self);
     }
 
+    #[allow(unused)]
     pub(crate) fn clone_to_string(self) -> String {
         match self {
             Value::Boolean(bool) => bool.to_string(),
@@ -208,8 +190,8 @@ impl Operation for UnaryOp {
 }
 
 pub(crate) struct Parser<'a> {
-    template: Vec<Token>,
-    ast: Contents<'a>,
+    template: Template<'a>,
+    ast: Vec<Content<'a>>,
     current: usize,
     base_template: Option<PathBuf>,
     arena: &'a Arena<'a>,
@@ -218,7 +200,7 @@ pub(crate) struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub(crate) fn new(arena: &'a Arena) -> Self {
         Parser {
-            template: Vec::new(),
+            template: &[],
             ast: Vec::new(),
             current: 0,
             base_template: None,
@@ -246,18 +228,17 @@ impl<'a> Parser<'a> {
         Err(())
     }
 
-    fn peek(&self) -> Option<&Token> {
+    fn peek(&self) -> Option<&Token<'_>> {
         self.template.get(self.current)
     }
 
-    fn next_and_take(&mut self) -> Option<Token> {
-        let current = self.template.get_mut(self.current)?;
-        let token = mem::replace(current, Token::CParen);
+    fn next(&mut self) -> Option<Token<'a>> {
+        let current = self.template.get(self.current).map(|x| x.clone())?;
         self.current += 1;
-        Some(token)
+        Some(current)
     }
 
-    fn parse_identifier(&mut self, ident: String) -> ExprRef<'a> {
+    fn parse_identifier(&mut self, ident: &'a str) -> ExprRef<'a> {
         // function call
         if self.next_if(Token::OParen) {
             let mut arguments = ArenaVec::new(self.arena);
@@ -322,9 +303,9 @@ impl<'a> Parser<'a> {
             });
         }
 
-        let val = match self.next_and_take() {
+        let val = match self.next() {
             Some(Token::Ident(ident)) => return self.parse_identifier(ident),
-            Some(Token::String(content)) => Value::String(content.into()),
+            Some(Token::String(content)) => Value::String(content),
             Some(Token::Boolean(bool)) => Value::Boolean(bool),
             Some(Token::Number(num)) => Value::Number(num),
             Some(_) => unreachable!(),
@@ -426,11 +407,11 @@ impl<'a> Parser<'a> {
             }
         } else if self.next_if(Token::For) {
             // NOTE: the self.expect function only compares the enum variant, and not the insides.
-            let Some(Token::Ident(element_ident)) = self.next_and_take() else {
+            let Some(Token::Ident(element_ident)) = self.next() else {
                 panic!("Expected Identifier");
             };
             self.expect(Token::In).expect("Expected in keyword");
-            let Some(Token::Ident(iterable_ident)) = self.next_and_take() else {
+            let Some(Token::Ident(iterable_ident)) = self.next() else {
                 panic!("Expected Identifier");
             };
 
@@ -465,8 +446,8 @@ impl<'a> Parser<'a> {
 
     fn parse_statement(&mut self) {
         if self.next_if(Token::Keys) {
-            let mut idents = Vec::new();
-            while let Some(ident) = self.next_and_take() {
+            let mut idents = ArenaVec::new(self.arena);
+            while let Some(ident) = self.next() {
                 let Token::Ident(ident) = ident else {
                     panic!("Expected identifier, found {:?}", ident);
                 };
@@ -482,7 +463,7 @@ impl<'a> Parser<'a> {
                 panic!("@base statement needs to take in a string as argument. For example `@base \"./file.html\"");
             };
 
-            self.base_template = Some(PathBuf::from(path.as_ref()));
+            self.base_template = Some(PathBuf::from(path));
         }
     }
 
@@ -501,7 +482,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn execute(mut self, content: Vec<DocumentKind<'a>>) -> (Contents<'a>, Option<PathBuf>) {
+    pub(crate) fn execute(mut self, content: Vec<DocumentKind<'a>>) -> (Vec<Content<'a>>, Option<PathBuf>) {
         content.into_iter().for_each(|thing| {
             if let DocumentKind::Markup(text) = thing {
                 self.ast.push(Content::Markup(text));

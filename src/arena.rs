@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use core::str;
-use std::{alloc::{alloc, dealloc, Layout}, cell::Cell, fmt::Debug, marker::PhantomData, ops::{Deref, DerefMut}, ptr::{self, copy_nonoverlapping}, slice::{from_raw_parts, from_raw_parts_mut}};
+use std::{alloc::{Layout, alloc, dealloc}, cell::Cell, fmt::Debug, marker::PhantomData, ops::{Deref, DerefMut}, ptr::{self, copy_nonoverlapping}, slice::{self, from_raw_parts, from_raw_parts_mut}};
 
 #[inline]
 fn array<T>(n: usize) -> Layout {
@@ -51,7 +51,7 @@ impl<'a> Arena<'a> {
         ptr
     }
     
-    pub fn alloc<T>(&self, item: T) -> &mut T {
+    pub fn alloc<T>(&self, item: T) -> &'a mut T {
         unsafe { 
             let ptr = self.alloc_bytes(size_of::<T>()) as *mut T;
             *ptr = item;
@@ -59,11 +59,23 @@ impl<'a> Arena<'a> {
         }
     }
 
-    pub fn alloc_str(&self, str: &str) -> &mut str {
+    pub fn alloc_str(&self, str: &str) -> &'a mut str {
         unsafe { 
             let ptr = self.alloc_bytes(str.len());
             copy_nonoverlapping(str.as_ptr(), ptr, str.len());
             ptr_to_string_mut(ptr, str.len()) 
+        }
+    }
+
+    pub fn alloc_slice<T>(&self, slice: &[T]) -> &'a mut [T] {
+        unsafe { 
+            let align = std::mem::align_of::<T>();
+            let padding = (align - (self.n.get() % align)) % align;
+            self.advance_by(padding);
+            let ptr = self.alloc_bytes(slice.len() * size_of::<T>());
+
+            copy_nonoverlapping(slice.as_ptr(), ptr as _, slice.len() * size_of::<T>());
+            slice::from_raw_parts_mut(ptr as _, slice.len())
         }
     }
 
@@ -131,10 +143,7 @@ impl<'a, T> ArenaVec<'a, T> {
             self.cap *= 2;
         }
 
-        unsafe { 
-            ptr::write(self.mem.add(self.len), item);
-        }
-
+        unsafe { ptr::write(self.mem.add(self.len), item) };
         self.len += 1;
     }
 
@@ -159,6 +168,10 @@ impl<'a, T> ArenaVec<'a, T> {
             _iter: PhantomData,
         }
     }
+
+    pub fn into_slice(self) -> &'a [T] {
+        unsafe { from_raw_parts(self.mem, self.len) }
+    }
 }
 
 impl<'a, T: Debug> Debug for ArenaVec<'a, T> {
@@ -167,8 +180,8 @@ impl<'a, T: Debug> Debug for ArenaVec<'a, T> {
     }
 }
 
-impl<'a, T> AsRef<[T]> for ArenaVec<'a, T> {
-    fn as_ref(&self) -> &[T] {
+impl<'a, T: 'a> AsRef<[T]> for ArenaVec<'a, T> {
+    fn as_ref(&self) -> &'a [T] {
         unsafe { from_raw_parts(self.mem, self.len) }
     }
 }
@@ -183,12 +196,13 @@ impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next = unsafe { self.start.add(1) };
-        if next > self.end {
+        if self.start >= self.end {
             return None;
         }
 
-        unsafe { Some(&*next) }
+        let item = unsafe { &*self.start };
+        self.start = unsafe { self.start.add(1) };
+        Some(item)
     }
 }
 

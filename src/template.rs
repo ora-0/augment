@@ -1,9 +1,9 @@
-use crate::{parser::*};
+use crate::parser::*;
 use std::{collections::HashMap, slice};
 
-pub(crate) type Environment = HashMap<String, Value>;
+pub(crate) type Environment<'a> = HashMap<&'a str, Value<'a>>;
 
-fn evaluate_arithmetic(kind: BinaryOp, lhs: &Expr, rhs: &Expr, env: &Environment) -> Value {
+fn evaluate_arithmetic<'a>(kind: BinaryOp, lhs: &Expr<'a>, rhs: &Expr<'a>, env: &Environment<'a>) -> Value<'a> {
     use BinaryOp as Op;
     use Value::*;
     let a = evaluate_expression(lhs, env).unwrap_number();
@@ -24,7 +24,7 @@ fn evaluate_arithmetic(kind: BinaryOp, lhs: &Expr, rhs: &Expr, env: &Environment
     }
 }
 
-fn evaluate_logic(kind: BinaryOp, lhs: &Expr, rhs: &Expr, env: &Environment) -> Value {
+fn evaluate_logic<'a>(kind: BinaryOp, lhs: &Expr<'a>, rhs: &Expr<'a>, env: &Environment<'a>) -> Value<'a> {
     use BinaryOp as Op;
     use Value::*;
     let a = evaluate_expression(lhs, env).unwrap_boolean();
@@ -36,18 +36,20 @@ fn evaluate_logic(kind: BinaryOp, lhs: &Expr, rhs: &Expr, env: &Environment) -> 
     }
 }
 
-fn evaluate_concat(kind: BinaryOp, lhs: &Expr, rhs: &Expr, env: &Environment) -> Value {
+#[allow(unused)]
+fn evaluate_concat<'a>(kind: BinaryOp, lhs: &Expr<'a>, rhs: &Expr<'a>, env: &Environment<'a>) -> Value<'a> {
     use BinaryOp as Op;
     use Value::*;
-    let a = evaluate_expression(lhs, env).clone_to_string();
-    let b = evaluate_expression(rhs, env).clone_to_string();
-    match kind {
-        Op::Concat => String((a + &b).into()),
-        _ => unreachable!(),
-    }
+    // let a = evaluate_expression(lhs, env).clone_to_string();
+    // let b = evaluate_expression(rhs, env).clone_to_string();
+    // match kind {
+    //     Op::Concat => String(&(a + &b)),
+    //     _ => unreachable!(),
+    // }
+    unimplemented!()
 }
 
-fn evaluate_index(lhs: &Expr, rhs: &Expr, env: &Environment) -> Value {
+fn evaluate_index<'a>(lhs: &Expr<'a>, rhs: &Expr<'a>, env: &Environment<'a>) -> Value<'a> {
     let list = evaluate_expression(lhs, env).unwrap_array();
     let index = evaluate_expression(rhs, env).unwrap_number();
     if index.is_sign_negative() {
@@ -56,7 +58,7 @@ fn evaluate_index(lhs: &Expr, rhs: &Expr, env: &Environment) -> Value {
     list[index.trunc() as usize].clone()
 }
 
-fn evaluate_binary_op(kind: BinaryOp, lhs: &Expr, rhs: &Expr, env: &Environment) -> Value {
+fn evaluate_binary_op<'a>(kind: BinaryOp, lhs: &Expr<'a>, rhs: &Expr<'a>, env: &Environment<'a>) -> Value<'a> {
     if kind.takes_in_numbers() {
         return evaluate_arithmetic(kind, lhs, rhs, env);
     }
@@ -72,7 +74,7 @@ fn evaluate_binary_op(kind: BinaryOp, lhs: &Expr, rhs: &Expr, env: &Environment)
     unreachable!()
 }
 
-fn evaluate_unary_op(kind: UnaryOp, value: &Expr, env: &Environment) -> Value {
+fn evaluate_unary_op<'a>(kind: UnaryOp, value: &Expr<'a>, env: &Environment<'a>) -> Value<'a> {
     use UnaryOp::*;
     match kind {
         Dummy => return evaluate_expression(value, env),
@@ -91,7 +93,7 @@ fn evaluate_unary_op(kind: UnaryOp, value: &Expr, env: &Environment) -> Value {
     }
 }
 
-fn evaluate_function_call(ident: &str, args: &[ExprRef], env: &Environment) -> Value {
+fn evaluate_function_call<'a>(ident: &str, args: &[ExprRef<'a>], env: &Environment<'a>) -> Value<'a> {
     // currently not very scalable
     // I'm planning to make a function struct and store them thereree
     match ident {
@@ -109,26 +111,25 @@ fn evaluate_function_call(ident: &str, args: &[ExprRef], env: &Environment) -> V
     }
 }
 
-fn evaluate_expression(expr: &Expr, env: &Environment) -> Value {
+fn evaluate_expression<'a>(expr: &Expr<'a>, env: &Environment<'a>) -> Value<'a> {
     match expr {
         Expr::BinaryOp { kind, lhs, rhs } => evaluate_binary_op(*kind, lhs, rhs, env),
         Expr::UnaryOp { kind, value } => evaluate_unary_op(*kind, value, env),
-        Expr::Value(Value::VarRef(ident)) => env.get(ident).unwrap_or(&Value::Null).clone(),
-        Expr::Value(value) => value.clone(),
+        Expr::Value(Value::VarRef(ident)) => env.get(*ident).unwrap_or(&Value::Null).to_owned(),
+        Expr::Value(value) => value.to_owned(),
         Expr::Function { ident, arguments } => evaluate_function_call(ident, arguments.as_ref(), env),
     }
 }
 
-type ContentIter<'a> = slice::Iter<'a, Content<'a>>;
-pub struct Augment<'a> {
-    iter: &'a mut ContentIter<'a>,
+pub struct Augment<'a, 'env, 'ast> {
+    iter: slice::Iter<'ast, Content<'a>>,
     result_buf: String,
-    env: &'a mut Environment,
+    env: &'env mut Environment<'a>,
     last_condition_is_true: bool,
 }
 
-impl<'a> Augment<'a> {
-    pub fn new(iter: &'a mut ContentIter<'a>, env: &'a mut Environment) -> Self {
+impl<'a, 'env, 'ast> Augment<'a, 'env, 'ast> {
+    pub fn new(iter: slice::Iter<'ast, Content<'a>>, env: &'env mut Environment<'a>) -> Self {
         Self {
             iter,
             result_buf: String::with_capacity(2048),
@@ -157,15 +158,16 @@ impl<'a> Augment<'a> {
                 Expression(expr) => evaluate_expression(expr, self.env).write_to(&mut self.result_buf),
 
                 Keys(idents) => {
-                    idents.into_iter().enumerate().for_each(|(i, ident)| {
-                        self.env.insert(ident.to_owned(), Value::Number(i as f32));
+                    idents.iter().for_each(|a| println!("ident: {a}"));
+                    idents.iter().enumerate().for_each(|(i, ident)| {
+                        self.env.insert(ident, Value::Number(i as f32));
                     });
                 }
             }
         }
     }
 
-    fn augment_if(&mut self, block: &Block) {
+    fn augment_if(&mut self, block: &Block<'a>) {
         // if i was bothered i would clean this up
         match block {
             Block::If { condition } => {
@@ -194,28 +196,28 @@ impl<'a> Augment<'a> {
         }
     }
 
-    fn augment_for(&mut self, element: &Value, iterable: &Value) {
+    fn augment_for(&mut self, element: &Value<'a>, iterable: &Value<'a>) {
         let body = self.iter.clone();
 
         let Value::VarRef(iteration_var) = element else { unreachable!() };
-        if self.env.contains_key(iteration_var) {
+        if self.env.contains_key(*iteration_var) {
             panic!("Cannot iterate with variable {iteration_var} because it has already been defined");
         }
 
         let Value::VarRef(iter_ident) = iterable else { unreachable!() };
-        let iterable = self.env.get(iter_ident).unwrap_or_else(|| {
+        let iterable = self.env.get(*iter_ident).unwrap_or_else(|| {
             panic!("Cannot iterate with variable {iter_ident} because it has not been defined");
         });
         let Value::Array(ref array) = iterable.clone() else {
             panic!("Cannot iterate with variable {iter_ident} because it is not an array",);
         };
 
-        self.env.insert(iteration_var.clone(), Value::Null);
+        self.env.insert(iteration_var, Value::Null);
         array
             .iter()
             .map(|value| {
-                *self.env.get_mut(iteration_var).unwrap() = value.clone();
-                *self.iter = body.clone();
+                *self.env.get_mut(*iteration_var).unwrap() = value.clone();
+                self.iter = body.clone();
                 self.augment()
             })
             .collect()

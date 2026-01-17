@@ -8,67 +8,85 @@ use parser::{Parser, Value};
 use std::{collections::HashMap, env, fs::read_to_string, io::{self, Read, stdin}, path::PathBuf, str::Chars};
 use template::{Environment, Augment};
 
-fn parse_value(value: &str) -> Value {
-    if value.starts_with('"') && value.ends_with('"') {
-        Value::String(value[1..value.len()-1].into())
-    } else if value.starts_with('[') && value.ends_with(']') {
-        let mut inner = value.chars();
-        inner.next();
-        inner.next_back();
-        parse_array(&mut inner)
-    } else if value.is_empty() {
-        Value::Null
-    } else if value.starts_with(char::is_numeric) {
-        let number = value.parse().expect("Failed to parse number");
-        Value::Number(number)
-    } else {
-        match value {
-            "true" => Value::Boolean(true),
-            "false" => Value::Boolean(false),
-            string => Value::String(string.into()),
-        }
-    }
+use crate::arena::Arena;
+
+struct ArgumentParser<'a> {
+    arena: &'a Arena<'a>,
+    // scratch: RefCell<String>,
 }
 
-fn parse_array(inner: &mut Chars) -> Value {
-    let mut vec = Vec::new();
-    let mut value = String::new(); // can't use take_while() because it will consume the last character
-    while let Some(char) = inner.next() {
-        if char == '[' {
-            value.clear();
-            vec.push(parse_array(inner));
-            continue;
+impl<'a> ArgumentParser<'a> {
+    fn new(arena: &'a Arena<'a>) -> Self {
+        Self {
+            arena,
+            // scratch: String::with_capacity(512).into(),
         }
-        if char == ']' {
-            if !value.is_empty() {
-                vec.push(parse_value(&value));
-                value.clear();
-            }
-            break;
-        }
-        if char == ',' {
-            if !value.is_empty() {
-                vec.push(parse_value(&value));
-                value.clear();
-            }
-            continue;
-        }
-        if char.is_whitespace() && value.is_empty() {
-            continue;
-        }
-        value.push(char);
     }
 
-    Value::Array(vec.into())
-}
+    fn parse_value(&mut self, value: &str) -> Value<'a> {
+        if value.starts_with('"') && value.ends_with('"') {
+            let string = &value[1..value.len()-1];
+            Value::String(self.arena.alloc_str(string))
+        } else if value.starts_with('[') && value.ends_with(']') {
+            let mut inner = value.chars();
+            inner.next();
+            inner.next_back();
+            self.parse_array(&mut inner)
+        } else if value.is_empty() {
+            Value::Null
+        } else if value.starts_with(char::is_numeric) {
+            let number = value.parse().expect("Failed to parse number");
+            Value::Number(number)
+        } else {
+            match value {
+                "true" => Value::Boolean(true),
+                "false" => Value::Boolean(false),
+                string => Value::String(self.arena.alloc_str(string)),
+            }
+        }
+    }
 
-fn parse_argument(param: String) -> (String, Value) {
-    let Some((ident, value)) = param.split_once('=') else {
-        panic!("Expected equals sign in parameter specification. Example: username=\"John\"")
-    };
-    let value = value.trim();
-    let value = parse_value(value);
-    (ident.to_owned(), value)
+    fn parse_array(&mut self, inner: &mut Chars) -> Value<'a> {
+        let mut vec = Vec::new(); // recursive call, better not allocate it in arena
+        let mut scratch = String::new();
+        while let Some(char) = inner.next() {
+            if char == '[' {
+                scratch.clear();
+                vec.push(self.parse_array(inner));
+                continue;
+            }
+            if char == ']' {
+                if !scratch.is_empty() {
+                    vec.push(self.parse_value(&scratch));
+                }
+                scratch.clear();
+                break;
+            }
+            if char == ',' {
+                if !scratch.is_empty() {
+                    vec.push(self.parse_value(&scratch));
+                }
+                scratch.clear();
+                continue;
+            }
+            if char.is_whitespace() && scratch.is_empty() {
+                continue;
+            }
+            scratch.push(char);
+        }
+
+        let vec = self.arena.alloc_slice(&vec);
+        Value::Array(vec)
+    }
+
+    fn parse_argument(&mut self, param: String) -> (&'a str, Value<'a>) {
+        let Some((ident, value)) = param.split_once('=') else {
+            panic!("Expected equals sign in parameter specification. Example: username=\"John\"")
+        };
+        let value = value.trim();
+        let value = self.parse_value(value);
+        (self.arena.alloc_str(ident), value)
+    }
 }
 
 fn read_from_stdin() -> String {
@@ -81,22 +99,24 @@ fn read_from_stdin() -> String {
     }
 }
 
-const ARENA_SIZE: usize = 8 * 1024;
+const ARENA_SIZE: usize = 16 * 1024;
 
 /// returns (the file templated, the base template that this one extends from)
-fn template_a_file(contents: String, environment: &mut Environment) -> (String, Option<PathBuf>) {
+fn template_a_file<'a, 'env>(contents: String, arena: &'a Arena<'a>, env: &'env mut Environment<'a>) -> (String, Option<PathBuf>) {
     // use std::time::Instant;
     // let before = Instant::now();
-    let mut lexer = Lexer::new(&contents);
-    let result = lexer.execute();
     // println!("{:?}", Instant::now() - before);
+ 
+    // XXX
+    let mut result = Vec::new();
+    let lexer = Lexer::new(contents.leak(), &arena);
+    lexer.execute(&mut result);
 
-    let arena = arena::Arena::new(ARENA_SIZE);
     let parser = Parser::new(&arena);
     let (result, base_template) = parser.execute(result);
 
-    let mut iter = result.iter();
-    let templater = Augment::new(&mut iter, environment);
+    let iter = result.iter();
+    let templater = Augment::new(iter, env);
     let result = templater.execute();
 
     (result, base_template)
@@ -106,8 +126,10 @@ fn main() -> io::Result<()> {
     let mut arguments = env::args().peekable();
     arguments.next();
 
-    let mut environment = HashMap::new();
-    environment.insert("slot".to_owned(), Value::String("".into()));
+    let mut env = HashMap::new();
+    env.insert("slot", Value::String("".into()));
+
+    let arena = arena::Arena::new(ARENA_SIZE);
 
     // parse cmd line arguments
     let mut advance = false;
@@ -125,17 +147,22 @@ fn main() -> io::Result<()> {
 
     if advance { arguments.next(); }
     if let Some(argument) = arguments.next() {
+        let mut parser = ArgumentParser::new(&arena);
         if argument == "-i" {
-            environment = arguments.map(parse_argument).collect();
+            arguments.for_each(|arg| {
+                let (k, v) = parser.parse_argument(arg);
+                env.insert(k, v);
+            });
         }
     }
 
     let mut to_be_templated = contents;
+    // let env =Rc::new(RefCell::new(env));
     loop {
-        let (result, base_template) = template_a_file(to_be_templated, &mut environment);
+        let (result, base_template) = template_a_file(to_be_templated, &arena, &mut env);
         if let Some(path) = base_template {
             to_be_templated = read_to_string(path).unwrap();
-            environment.insert("slot".to_owned(), Value::String(result.into()));
+            env.insert("slot", Value::String(result.leak()));
         } else {
             println!("{result}");
             break;
