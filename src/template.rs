@@ -121,15 +121,15 @@ fn evaluate_expression<'a>(expr: &Expr<'a>, env: &Environment<'a>) -> Value<'a> 
     }
 }
 
-pub struct Augment<'a, 'env, 'ast> {
-    iter: slice::Iter<'ast, Content<'a>>,
+pub struct Augment<'a, 'b> {
+    iter: slice::Iter<'b, Content<'a>>,
     result_buf: String,
-    env: &'env mut Environment<'a>,
+    env: &'b mut Environment<'a>,
     last_condition_is_true: bool,
 }
 
-impl<'a, 'env, 'ast> Augment<'a, 'env, 'ast> {
-    pub fn new(iter: slice::Iter<'ast, Content<'a>>, env: &'env mut Environment<'a>) -> Self {
+impl<'a, 'b> Augment<'a, 'b> {
+    pub fn new(iter: slice::Iter<'b, Content<'a>>, env: &'b mut Environment<'a>) -> Self {
         Self {
             iter,
             result_buf: String::with_capacity(2048),
