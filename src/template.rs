@@ -94,8 +94,6 @@ fn evaluate_unary_op<'a>(kind: UnaryOp, value: &Expr<'a>, env: &Environment<'a>)
 }
 
 fn evaluate_function_call<'a>(ident: &str, args: &[ExprRef<'a>], env: &Environment<'a>) -> Value<'a> {
-    // currently not very scalable
-    // I'm planning to make a function struct and store them thereree
     match ident {
         "len" => {
             // make this better later
@@ -121,44 +119,43 @@ fn evaluate_expression<'a>(expr: &Expr<'a>, env: &Environment<'a>) -> Value<'a> 
     }
 }
 
-pub struct Augment<'a, 'b> {
-    iter: slice::Iter<'b, Content<'a>>,
-    result_buf: String,
+pub struct Augment<'a, 'b, 's> {
+    iter: slice::Iter<'b, Content<'a, 's>>,
+    result: String,
     env: &'b mut Environment<'a>,
-    last_condition_is_true: bool,
 }
 
-impl<'a, 'b> Augment<'a, 'b> {
-    pub fn new(iter: slice::Iter<'b, Content<'a>>, env: &'b mut Environment<'a>) -> Self {
+impl<'a, 'b, 's> Augment<'a, 'b, 's> {
+    pub fn new(iter: slice::Iter<'b, Content<'a, 's>>, env: &'b mut Environment<'a>) -> Self {
         Self {
             iter,
-            result_buf: String::with_capacity(2048),
+            result: String::with_capacity(2048),
             env,
-            last_condition_is_true: false
         }
     }
 
     pub fn execute(mut self) -> String {
         self.augment();
-        return self.result_buf
+        return self.result
     }
 
     fn augment(&mut self) {
         use crate::parser::Block::*;
         use crate::parser::Content::*;
+
+        let mut last_if_result = false;
         while let Some(next) = self.iter.next() {
             match next {
-                Markup(content) => self.result_buf.push_str(content),
+                Markup(content) => self.result.push_str(content),
+                Expression(expr) => evaluate_expression(expr, self.env).write_to(&mut self.result),
 
-                Block { kind: block @ (Else | If {..} | ElseIf {..}) } => self.augment_if(block),
-
+                Block { kind: If {..} } => last_if_result = self.augment_if(next),
+                Block { kind: Else | ElseIf {..} } if last_if_result => self.skip_block(),
+                Block { kind: Else | ElseIf {..} } => last_if_result = self.augment_if(next),
                 Block { kind: For { element, iterable } } => self.augment_for(element, iterable),
                 EndBlock => return,
 
-                Expression(expr) => evaluate_expression(expr, self.env).write_to(&mut self.result_buf),
-
                 Keys(idents) => {
-                    idents.iter().for_each(|a| println!("ident: {a}"));
                     idents.iter().enumerate().for_each(|(i, ident)| {
                         self.env.insert(ident, Value::Number(i as f32));
                     });
@@ -167,32 +164,48 @@ impl<'a, 'b> Augment<'a, 'b> {
         }
     }
 
-    fn augment_if(&mut self, block: &Block<'a>) {
-        // if i was bothered i would clean this up
-        match block {
-            Block::If { condition } => {
-                let condition = evaluate_expression(condition, self.env).unwrap_boolean();
-                self.last_condition_is_true = false;
-                if condition {
-                    self.augment();
-                    self.last_condition_is_true = true;
-                }
+    fn skip_block(&mut self) {
+        use crate::parser::Content::*;
+        
+        let mut nesting_level = 0;
+        while let Some(next) = self.iter.next() {
+            eprintln!("skipping on: {next:?}");
+            match next {
+                Block {..} => nesting_level += 1,
+                EndBlock if nesting_level == 0 => return,
+                EndBlock => nesting_level -= 1,
+
+                _ => continue,
             }
-            Block::ElseIf { .. } if self.last_condition_is_true => (),
-            Block::ElseIf { condition } => {
+        }
+
+        panic!("missing closing block");
+    }
+
+    fn augment_if(&mut self, next: &'b Content<'a, 's>) -> bool {
+        use crate::parser::Block::*;
+        use crate::parser::Content::*;
+        
+        match next {
+            Block { kind: If { condition } | ElseIf { condition } } => {
+                eprintln!("if {condition:?}");
                 let condition = evaluate_expression(condition, self.env).unwrap_boolean();
-                if condition {
+                eprintln!("evaluates to ... {condition:?}");
+                if condition { 
                     self.augment();
-                    self.last_condition_is_true = true;
+                    true
+                } else { 
+                    self.skip_block();
+                    false 
                 }
             }
 
-            Block::Else if self.last_condition_is_true => (),
-            Block::Else => {
+            Block { kind: Else } => {
                 self.augment();
+                true
             }
 
-            Block::For { .. } => unreachable!(),
+            _ => unreachable!(),
         }
     }
 

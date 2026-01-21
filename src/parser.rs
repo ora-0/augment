@@ -3,8 +3,8 @@ use crate::arena::{Arena, ArenaBox, ArenaVec};
 use std::{mem, path::PathBuf, fmt::Write};
 
 #[derive(Debug)]
-pub(crate) enum Content<'a> {
-    Markup(&'a str),
+pub(crate) enum Content<'a, 's> {
+    Markup(&'s str),
     Expression(ExprRef<'a>),
     Keys(ArenaVec<'a, &'a str>),
     Block { kind: Block<'a> },
@@ -189,15 +189,15 @@ impl Operation for UnaryOp {
     }
 }
 
-pub(crate) struct Parser<'a> {
+pub(crate) struct Parser<'a, 's> {
     template: Template<'a>,
-    ast: Vec<Content<'a>>,
+    ast: Vec<Content<'a, 's>>,
     current: usize,
     base_template: Option<PathBuf>,
     arena: &'a Arena<'a>,
 }
 
-impl<'a> Parser<'a> {
+impl<'a, 's> Parser<'a, 's> {
     pub(crate) fn new(arena: &'a Arena) -> Self {
         Parser {
             template: &[],
@@ -482,7 +482,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn execute(mut self, content: Vec<DocumentKind<'a>>) -> (Vec<Content<'a>>, Option<PathBuf>) {
+    pub(crate) fn execute(mut self, content: Vec<DocumentKind<'a, 's>>) -> (Vec<Content<'a, 's>>, Option<PathBuf>) {
         content.into_iter().for_each(|thing| {
             if let DocumentKind::Markup(text) = thing {
                 self.ast.push(Content::Markup(text));

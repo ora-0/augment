@@ -43,13 +43,13 @@ pub(crate) enum Token<'a> {
 pub type Template<'a> = &'a [Token<'a>];
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum DocumentKind<'a> {
-    Markup(&'a str),
+pub(crate) enum DocumentKind<'a, 's> {
+    Markup(&'s str),
     Template(Template<'a>),
 }
 
-pub(crate) struct Lexer<'a> {
-    contents: UnsafeCell<&'a str>, // I'm sorry
+pub(crate) struct Lexer<'a, 's> {
+    contents: UnsafeCell<&'s str>, // I'm sorry
     arena: &'a Arena<'a>,
 }
 
@@ -58,8 +58,8 @@ enum Status {
     Eof,
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(contents: &'a str, arena: &'a Arena<'a>) -> Self {
+impl<'a, 's> Lexer<'a, 's> {
+    pub fn new(contents: &'s str, arena: &'a Arena<'a>) -> Self {
         Lexer {
             contents: UnsafeCell::new(contents),
             arena,
@@ -105,7 +105,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn read_until(&self, target: char) -> (&'a str, Status) {
+    fn read_until(&self, target: char) -> (&'s str, Status) {
         let str = unsafe { &mut *self.contents.get() };
         let mut n = 0;
         while let Some(char) = self.nth(n) {
@@ -277,11 +277,11 @@ impl<'a> Lexer<'a> {
         self.arena.alloc_slice(template.as_ref())
     }
 
-    // pub fn execute(self: &'s mut Self<'a>) -> Vec<DocumentKind<'s>> {
-    // 1. 's |> return lives as long as &self lives
+    // pub fn execute(self: &'self mut Self<'a>) -> Vec<DocumentKind<'s>> {
+    // 1. 'self |> return lives as long as &self lives
     // 2. 'a |> data in self lives as long as self lives 
-    // 3. 'a: 's
-    pub fn execute(self, buf: &mut Vec<DocumentKind<'a>>) {
+    // 3. 'a: 'self
+    pub fn execute(self, buf: &mut Vec<DocumentKind<'a, 's>>) {
         loop {
             match self.read_until('{') {
                 (before, Status::Continue) => buf.push(DocumentKind::Markup(before)),

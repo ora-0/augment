@@ -107,9 +107,8 @@ fn template_a_file<'a, 'env>(contents: String, arena: &'a Arena<'a>, env: &'env 
     // let before = Instant::now();
     // println!("{:?}", Instant::now() - before);
  
-    // XXX
     let mut result = Vec::new();
-    let lexer = Lexer::new(contents.leak(), &arena);
+    let lexer = Lexer::new(&contents, &arena);
     lexer.execute(&mut result);
 
     let parser = Parser::new(&arena);
@@ -157,7 +156,6 @@ fn main() -> io::Result<()> {
     }
 
     let mut to_be_templated = contents;
-    // let env =Rc::new(RefCell::new(env));
     loop {
         let (result, base_template) = template_a_file(to_be_templated, &arena, &mut env);
         if let Some(path) = base_template {
