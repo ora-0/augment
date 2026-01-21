@@ -70,7 +70,7 @@ impl<'a> Arena<'a> {
     pub fn alloc_slice<T>(&self, slice: &[T]) -> &'a mut [T] {
         unsafe { 
             let align = std::mem::align_of::<T>();
-            let padding = align - (self.n.get() % align);
+            let padding = align - (self.n.get() % align) % align;
             self.advance_by(padding);
             let ptr = self.alloc_bytes(slice.len() * size_of::<T>());
 

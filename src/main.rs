@@ -107,9 +107,8 @@ fn template_a_file<'a, 'env>(contents: String, arena: &'a Arena<'a>, env: &'env 
     // let before = Instant::now();
     // println!("{:?}", Instant::now() - before);
  
-    let mut result = Vec::new();
     let lexer = Lexer::new(&contents, &arena);
-    lexer.execute(&mut result);
+    let result = lexer.execute();
 
     let parser = Parser::new(&arena);
     let (result, base_template) = parser.execute(result);

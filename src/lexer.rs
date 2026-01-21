@@ -281,224 +281,227 @@ impl<'a, 's> Lexer<'a, 's> {
     // 1. 'self |> return lives as long as &self lives
     // 2. 'a |> data in self lives as long as self lives 
     // 3. 'a: 'self
-    pub fn execute(self, buf: &mut Vec<DocumentKind<'a, 's>>) {
+    pub fn execute(self) -> Vec<DocumentKind<'a, 's>> {
+        let mut result = Vec::new();
         loop {
             match self.read_until('{') {
-                (before, Status::Continue) => buf.push(DocumentKind::Markup(before)),
+                (before, Status::Continue) => result.push(DocumentKind::Markup(before)),
                 (before, Status::Eof) => {
-                    buf.push(DocumentKind::Markup(before));
+                    result.push(DocumentKind::Markup(before));
                     break;
                 }
             }
 
             let template = self.next_template();
-            buf.push(DocumentKind::Template(template));
+            result.push(DocumentKind::Template(template));
         }
+
+        result
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use crate::arena;
-//     use super::*;
+#[cfg(test)]
+mod tests {
+    use crate::arena;
+    use super::*;
 
-//     const ARENA_SIZE: usize = 8 * 1024;
+    const ARENA_SIZE: usize = 8 * 1024;
 
-//     #[test]
-//     fn categorizes_markup_and_templates() {
-//         let contents = "markup{}end";
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         assert_eq!(lexer.execute(), vec![
-//             DocumentKind::Markup("markup"),
-//             DocumentKind::Template(vec![]),
-//             DocumentKind::Markup("end"),
-//         ]);
-//     }
+    #[test]
+    fn categorizes_markup_and_templates() {
+        let contents = "markup{}end";
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        assert_eq!(lexer.execute(), vec![
+            DocumentKind::Markup("markup"),
+            DocumentKind::Template(&[]),
+            DocumentKind::Markup("end"),
+        ]);
+    }
 
-//     #[test]
-//     fn lexes_multiple_templates() {
-//         let contents = "markup 1: {}markup 2: {}markup 3: {}";
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         assert_eq!(lexer.execute(), vec![
-//             DocumentKind::Markup("markup 1: "),
-//             DocumentKind::Template(vec![]),
-//             DocumentKind::Markup("markup 2: "),
-//             DocumentKind::Template(vec![]),
-//             DocumentKind::Markup("markup 3: "),
-//             DocumentKind::Template(vec![]),
-//             DocumentKind::Markup(""),
-//         ]);
-//     }
+    #[test]
+    fn lexes_multiple_templates() {
+        let contents = "markup 1: {}markup 2: {}markup 3: {}";
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        assert_eq!(lexer.execute(), vec![
+            DocumentKind::Markup("markup 1: "),
+            DocumentKind::Template(&[]),
+            DocumentKind::Markup("markup 2: "),
+            DocumentKind::Template(&[]),
+            DocumentKind::Markup("markup 3: "),
+            DocumentKind::Template(&[]),
+            DocumentKind::Markup(""),
+        ]);
+    }
 
-//     #[test]
-//     fn skips_whitespace_and_recongnizes_idents() {
-//         let contents = "{      variable_1       }";
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         assert_eq!(lexer.execute(), vec![
-//             DocumentKind::Markup(""),
-//             DocumentKind::Template(vec![Token::Ident("variable_1")]),
-//             DocumentKind::Markup(""),
-//         ]);
-//     }
+    #[test]
+    fn skips_whitespace_and_recongnizes_idents() {
+        let contents = "{      variable_1       }";
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        assert_eq!(lexer.execute(), vec![
+            DocumentKind::Markup(""),
+            DocumentKind::Template(&[Token::Ident("variable_1")]),
+            DocumentKind::Markup(""),
+        ]);
+    }
 
-//     #[test]
-//     fn recognizes_string() {
-//         let contents = r#"{"lorem ipsum"}"#;
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         assert_eq!(lexer.execute(), vec![
-//             DocumentKind::Markup(""),
-//             DocumentKind::Template(vec![Token::String("lorem ipsum")]),
-//             DocumentKind::Markup(""),
-//         ]);
-//     }
+    #[test]
+    fn recognizes_string() {
+        let contents = r#"{"lorem ipsum"}"#;
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        assert_eq!(lexer.execute(), vec![
+            DocumentKind::Markup(""),
+            DocumentKind::Template(&[Token::String("lorem ipsum")]),
+            DocumentKind::Markup(""),
+        ]);
+    }
 
-//     #[test]
-//     fn recognizes_escaped_string() {
-//         let contents = r#"{"\"lorem\\ipsum\"\n"}"#;
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         assert_eq!(lexer.execute(), vec![
-//             DocumentKind::Markup(""),
-//             DocumentKind::Template(vec![Token::String("\"lorem\\ipsum\"\n")]),
-//             DocumentKind::Markup(""),
-//         ]);
-//     }
+    #[test]
+    fn recognizes_escaped_string() {
+        let contents = r#"{"\"lorem\\ipsum\"\n"}"#;
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        assert_eq!(lexer.execute(), vec![
+            DocumentKind::Markup(""),
+            DocumentKind::Template(&[Token::String("\"lorem\\ipsum\"\n")]),
+            DocumentKind::Markup(""),
+        ]);
+    }
 
-//     #[test]
-//     #[should_panic]
-//     fn panics_on_deformed_escape_char() {
-//         let contents = r#"{\q}"#;
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         lexer.execute();
-//     }
+    #[test]
+    #[should_panic]
+    fn panics_on_deformed_escape_char() {
+        let contents = r#"{\q}"#;
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        lexer.execute();
+    }
 
-//     #[test]
-//     fn recognizes_number() {
-//         let contents = "{23491.23}";
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         assert_eq!(lexer.execute(), &[
-//             DocumentKind::Markup(""),
-//             DocumentKind::Template(&[Token::Number(23491.23)]),
-//             DocumentKind::Markup(""),
-//         ]);
-//     }
+    #[test]
+    fn recognizes_number() {
+        let contents = "{23491.23}";
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        assert_eq!(lexer.execute(), &[
+            DocumentKind::Markup(""),
+            DocumentKind::Template(&[Token::Number(23491.23)]),
+            DocumentKind::Markup(""),
+        ]);
+    }
 
-//     #[test]
-//     #[should_panic]
-//     fn panics_on_deformed_number() {
-//         let contents = "{2s3491.23}";
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         lexer.execute();
-//     }
+    #[test]
+    #[should_panic]
+    fn panics_on_deformed_number() {
+        let contents = "{2s3491.23}";
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        lexer.execute();
+    }
 
-//     #[test]
-//     fn recognizes_boolean() {
-//         let contents = "{true} {false}";
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         assert_eq!(lexer.execute(), &[
-//             DocumentKind::Markup(""),
-//             DocumentKind::Template(&[Token::Boolean(true)]),
-//             DocumentKind::Markup(" "),
-//             DocumentKind::Template(&[Token::Boolean(false)]),
-//             DocumentKind::Markup(""),
-//         ]);
-//     }
+    #[test]
+    fn recognizes_boolean() {
+        let contents = "{true} {false}";
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        assert_eq!(lexer.execute(), &[
+            DocumentKind::Markup(""),
+            DocumentKind::Template(&[Token::Boolean(true)]),
+            DocumentKind::Markup(" "),
+            DocumentKind::Template(&[Token::Boolean(false)]),
+            DocumentKind::Markup(""),
+        ]);
+    }
 
-//     #[test]
-//     fn recognizes_keywords() {
-//         let contents = "{if else for in keys}";
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         assert_eq!(lexer.execute(), &[
-//             DocumentKind::Markup(""),
-//             DocumentKind::Template(&[
-//                 Token::If,
-//                 Token::Else,
-//                 Token::For,
-//                 Token::In,
-//                 Token::Keys,
-//             ]),
-//             DocumentKind::Markup(""),
-//         ]);
-//     }
+    #[test]
+    fn recognizes_keywords() {
+        let contents = "{if else for in keys}";
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        assert_eq!(lexer.execute(), &[
+            DocumentKind::Markup(""),
+            DocumentKind::Template(&[
+                Token::If,
+                Token::Else,
+                Token::For,
+                Token::In,
+                Token::Keys,
+            ]),
+            DocumentKind::Markup(""),
+        ]);
+    }
 
-//     #[test]
-//     fn recognizes_tokens() {
-//         let contents = "{#:/@}";
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         assert_eq!(lexer.execute(), &[
-//             DocumentKind::Markup(""),
-//             DocumentKind::Template(&[
-//                 Token::Hashtag,
-//                 Token::Colon,
-//                 Token::Slash,
-//                 Token::At,
-//             ]),
-//             DocumentKind::Markup(""),
-//         ]);
-//     }
+    #[test]
+    fn recognizes_tokens() {
+        let contents = "{#:/@}";
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        assert_eq!(lexer.execute(), &[
+            DocumentKind::Markup(""),
+            DocumentKind::Template(&[
+                Token::Hashtag,
+                Token::Colon,
+                Token::Slash,
+                Token::At,
+            ]),
+            DocumentKind::Markup(""),
+        ]);
+    }
 
-//     #[test]
-//     fn recognizes_two_length_tokens() {
-//         let contents = "{<= >= != ++}";
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         assert_eq!(lexer.execute(), &[
-//             DocumentKind::Markup(""),
-//             DocumentKind::Template(&[
-//                 Token::LessThanOrEquals,
-//                 Token::GreaterThanOrEquals,
-//                 Token::NotEquals,
-//                 Token::Concat,
-//             ]),
-//             DocumentKind::Markup(""),
-//         ]);
-//     }
+    #[test]
+    fn recognizes_two_length_tokens() {
+        let contents = "{<= >= != ++}";
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        assert_eq!(lexer.execute(), &[
+            DocumentKind::Markup(""),
+            DocumentKind::Template(&[
+                Token::LessThanOrEquals,
+                Token::GreaterThanOrEquals,
+                Token::NotEquals,
+                Token::Concat,
+            ]),
+            DocumentKind::Markup(""),
+        ]);
+    }
 
-//     #[test]
-//     fn bunch_of_stuff() {
-//         let contents = "{#if len(list) > 4 & true}and {\"yes \" ++ \"it works\"}.{:else}no{/}";
-//         let arena = arena::Arena::new(ARENA_SIZE);
-//         let mut lexer = Lexer::new(&contents, &arena);
-//         assert_eq!(lexer.execute(), &[
-//             DocumentKind::Markup(""),
-//             DocumentKind::Template(&[
-//                 Token::Hashtag,
-//                 Token::If,
-//                 Token::Ident("len"),
-//                 Token::OParen,
-//                 Token::Ident("list"),
-//                 Token::CParen,
-//                 Token::GreaterThan,
-//                 Token::Number(4.0),
-//                 Token::And,
-//                 Token::Boolean(true),
-//             ]),
-//             DocumentKind::Markup("and "),
-//             DocumentKind::Template(&[
-//                 Token::String("yes "),
-//                 Token::Concat,
-//                 Token::String("it works"),
-//             ]),
-//             DocumentKind::Markup("."),
-//             DocumentKind::Template(&[
-//                 Token::Colon,
-//                 Token::Else
-//             ]),
-//             DocumentKind::Markup("no"),
-//             DocumentKind::Template(&[
-//                 Token::Slash,
-//             ]),
-//             DocumentKind::Markup(""),
-//         ]);
-//     }
-// }
+    #[test]
+    fn bunch_of_stuff() {
+        let contents = "{#if len(list) > 4 & true}and {\"yes \" ++ \"it works\"}.{:else}no{/}";
+        let arena = arena::Arena::new(ARENA_SIZE);
+        let lexer = Lexer::new(&contents, &arena);
+        assert_eq!(lexer.execute(), &[
+            DocumentKind::Markup(""),
+            DocumentKind::Template(&[
+                Token::Hashtag,
+                Token::If,
+                Token::Ident("len"),
+                Token::OParen,
+                Token::Ident("list"),
+                Token::CParen,
+                Token::GreaterThan,
+                Token::Number(4.0),
+                Token::And,
+                Token::Boolean(true),
+            ]),
+            DocumentKind::Markup("and "),
+            DocumentKind::Template(&[
+                Token::String("yes "),
+                Token::Concat,
+                Token::String("it works"),
+            ]),
+            DocumentKind::Markup("."),
+            DocumentKind::Template(&[
+                Token::Colon,
+                Token::Else
+            ]),
+            DocumentKind::Markup("no"),
+            DocumentKind::Template(&[
+                Token::Slash,
+            ]),
+            DocumentKind::Markup(""),
+        ]);
+    }
+}
